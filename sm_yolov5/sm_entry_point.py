@@ -1,20 +1,19 @@
-
 import sys
 import os
 import subprocess
 import shutil
 
-print( "Hello from sm_entry_point.py" )
-
-print( "Current working directory :", os.getcwd() )
-
-subprocess.run( [ "ls", "-al", "/opt/ml" ] )
-subprocess.run( [ "find", "/opt/ml/code" ] )
-subprocess.run( [ "find", "/opt/ml/input" ] )
-subprocess.run( [ "find", "/opt/ml/model" ] )
-subprocess.run( [ "find", "/opt/ml/output" ] )
-
 # FIXME : use environment variables
+
+print( "Starting sm_entry_point.py" )
+
+if 0:
+    print( "Current working directory :", os.getcwd() )
+    subprocess.run( [ "ls", "-al", "/opt/ml" ] )
+    subprocess.run( [ "find", "/opt/ml/code" ] )
+    subprocess.run( [ "find", "/opt/ml/input" ] )
+    subprocess.run( [ "find", "/opt/ml/model" ] )
+    subprocess.run( [ "find", "/opt/ml/output" ] )
 
 cmd = [
     sys.executable,
@@ -22,22 +21,29 @@ cmd = [
     "--img", "640",
     "--batch", "16",
     "--epochs", "8",
-    "--hyp", "/opt/ml/input/data/config/hyp.VOC.yaml",
+    "--hyp", "/opt/ml/input/data/config/hyp.yaml",
     "--data", "/opt/ml/input/data/config/data.yaml",
     "--cfg", "/opt/ml/input/data/config/yolov5s.yaml",
     "--weights", "/opt/ml/input/data/config/yolov5s.pt",
     "--name", "sm_yolov5",
 ]
-print( "Training command :", cmd )
+
+print( "Starting training :", cmd )
+
 subprocess.run(cmd)
 
 print( "Training ended" )
 
-subprocess.run( [ "find", "/opt/ml/code" ] )
-subprocess.run( [ "find", "/opt/ml/input" ] )
-subprocess.run( [ "find", "/opt/ml/model" ] )
-subprocess.run( [ "find", "/opt/ml/output" ] )
+if 0:
+    subprocess.run( [ "find", "/opt/ml/code" ] )
+    subprocess.run( [ "find", "/opt/ml/input" ] )
+    subprocess.run( [ "find", "/opt/ml/model" ] )
+    subprocess.run( [ "find", "/opt/ml/output" ] )
 
-shutil.copytree( f"/opt/ml/code/runs/train/sm_yolov5", f"/opt/ml/model/sm_yolov5" )
+result_src = "/opt/ml/code/runs/train/sm_yolov5"
+result_dst = "/opt/ml/model/sm_yolov5"
 
-print( "sm_entry_point ended" )
+print( f"Copying {result_src} -> {result_dst}" )
+shutil.copytree( result_src, result_dst )
+
+print( "sm_entry_point.py ended" )
