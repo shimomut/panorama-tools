@@ -1,0 +1,5 @@
+train: /opt/ml/input/data/images/train/
+val: /opt/ml/input/data/images/train/
+
+nc: 2
+names: ['with-safetyglasses', 'wo-safetyglasses']
