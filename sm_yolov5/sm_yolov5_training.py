@@ -3,25 +3,29 @@ import urllib
 import tarfile
 import shutil
 import datetime
+import argparse
 import subprocess
 
 import sagemaker
 from sagemaker.session import TrainingInput
 from sagemaker.pytorch import PyTorch
 
-sagemaker_session = sagemaker.Session()
-bucket = sagemaker_session.default_bucket()
-
-# FIXME : make configurable
-role = "arn:aws:iam::357984623133:role/service-role/AmazonSageMaker-ExecutionRole-20210713T114662"
-#role = None
-
-print("Role :", role)
-print("Bucket :", bucket)
-
 # ---
 
-app_name = "MySmTest"
+argparser = argparse.ArgumentParser( description = 'Yolov5 training with SageMaker training' )
+argparser.add_argument('--name', action='store', required=True, help='Training name (e.g. experiment1)')
+argparser.add_argument('--s3-path', dest="s3_path", action='store', required=True, help='S3 path to put input/output (e.g. s3://bucket/experiment1)')
+argparser.add_argument('--role', action='store', required=True, help='IAM Role ARM')
+args = argparser.parse_args()
+
+training_name = args.name
+role = args.role
+s3_path = args.s3_path
+
+assert s3_path.startswith("s3://")
+s3_path = s3_path.rstrip("/")
+
+# ---
 
 #yolov5_version = "6.2"
 yolov5_version = "6.1"
@@ -79,14 +83,14 @@ shutil.copy( f"./data.yaml", os.path.join( work_dirname, "config" ) ) # FIXME : 
 shutil.copy( f"./sm_entry_point.py", os.path.join( work_dirname, f"yolov5-{yolov5_version}/" ) )
 
 # upload to S3
-subprocess.run( [ "aws", "s3", "sync", os.path.join( work_dirname, "config" ), f"s3://{bucket}/{app_name}/config" ] )
+subprocess.run( [ "aws", "s3", "sync", os.path.join( work_dirname, "config" ), f"{s3_path}/config" ] )
 
 
-s3_config = f"s3://{bucket}/{app_name}/config"
-s3_sources = f"s3://{bucket}/{app_name}/sources"
-s3_images = f"s3://{bucket}/{app_name}/images" # FIXME : make configurabke
-s3_labels = f"s3://{bucket}/{app_name}/labels" # FIXME : make configurabke
-s3_results = f"s3://{bucket}/{app_name}/results"
+s3_config = f"{s3_path}/config"
+s3_sources = f"{s3_path}/sources"
+s3_images = f"{s3_path}/images" # FIXME : make configurabke
+s3_labels = f"{s3_path}/labels" # FIXME : make configurabke
+s3_results = f"{s3_path}/results"
 
 print( "s3_config :", s3_config )
 print( "s3_sources :", s3_sources )
@@ -106,7 +110,7 @@ estimator = PyTorch(
     input_mode='File',
     code_location=s3_sources,
     output_path=s3_results,
-    base_job_name=f'{app_name}-yolov5'
+    base_job_name=f'{training_name}'
 )
 
 
@@ -118,7 +122,7 @@ inputs = {
 
 estimator.fit(inputs)
 
-s3_output = f"s3://{bucket}/{app_name}/results/{estimator._current_job_name}/output/"
+s3_output = f"s3://{s3_path}/results/{estimator._current_job_name}/output/"
 print(s3_output)
 
 subprocess.run( [ "aws", "s3", "ls", s3_output ] )
