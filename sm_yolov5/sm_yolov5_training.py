@@ -122,7 +122,7 @@ inputs = {
 
 estimator.fit(inputs)
 
-s3_output = f"s3://{s3_path}/results/{estimator._current_job_name}/output/"
+s3_output = f"{s3_path}/results/{estimator._current_job_name}/output/"
 print(s3_output)
 
 subprocess.run( [ "aws", "s3", "ls", s3_output ] )
