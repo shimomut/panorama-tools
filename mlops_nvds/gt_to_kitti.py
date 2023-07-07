@@ -79,7 +79,7 @@ def processSingleImage(d):
             assert len(elements)==15
             s = " ".join(elements)
             
-            fd_label.write(s)
+            fd_label.write( s + "\n" )
 
     # Copy image file
     shutil.copyfile( src_image_filepath, dst_image_filepath )
