@@ -1,86 +1,53 @@
 import json
+import datetime
 
 import paho.mqtt.client as mqtt
 
-# just print requests
-if 0:
-    mqtt_client = mqtt.Client( "my_mqtt_client2" )
+mqtt_client = mqtt.Client( "my_mqtt_client3" )
 
-    def on_connect( client, userdata, flags, rc ):
+def on_connect( client, userdata, flags, rc ):
 
-        print( "on_connect", [ client, userdata, flags, rc ] )
-        
-        if rc != 0:
-            print("Connection to broker failed %d\n" % rc)
+    print( "on_connect", [ client, userdata, flags, rc ] )
+    
+    if rc != 0:
+        print("Connection to broker failed %d\n" % rc)
 
-    def on_message( client, userdata, message ):
+def on_message( client, userdata, message ):
 
-        print( "on_message", [ client, userdata, message ] )
+    print( "on_message", [ client, userdata, message ] )
 
-        request_payload_s = message.payload.decode("utf-8")
+    request_payload_s = message.payload.decode("utf-8")
+    request_payload_d = json.loads(request_payload_s)
 
-        print("message topic :", message.topic )
-        print("message payload :", request_payload_s )
-        print("message qos :", message.qos )
-        print("message retain flag :", message.retain )
+    print("message topic :", message.topic )
+    print("message payload :", request_payload_s )
+    print("message qos :", message.qos )
+    print("message retain flag :", message.retain )
 
-    mqtt_client.on_connect = on_connect
-    mqtt_client.on_message = on_message
+    command = request_payload_d["command"]
+    if command == "SayHello":
 
-    broker = "broker.emqx.io"
-    port = 1883
+        t = datetime.datetime.now()
 
-    mqtt_client.connect( broker, port )
+        response_payload_d = {
+            "result" : f"Hello {t}"
+        }
 
-    mqtt_client.subscribe("panorama/test1")
+        print( "sending response :", request_payload_d["response_topic"], response_payload_d )
 
-    mqtt_client.loop_forever()
+        mqtt_client.publish( request_payload_d["response_topic"], json.dumps(response_payload_d) )
 
-# request & response
-if 1:
-    mqtt_client = mqtt.Client( "my_mqtt_client3" )
+    else:
+        raise ValueError(f"Unknown command {command}")
 
-    def on_connect( client, userdata, flags, rc ):
+mqtt_client.on_connect = on_connect
+mqtt_client.on_message = on_message
 
-        print( "on_connect", [ client, userdata, flags, rc ] )
-        
-        if rc != 0:
-            print("Connection to broker failed %d\n" % rc)
+broker = "broker.emqx.io"
+port = 1883
 
-    def on_message( client, userdata, message ):
+mqtt_client.connect( broker, port )
 
-        print( "on_message", [ client, userdata, message ] )
+mqtt_client.subscribe("panorama/remote_command/request")
 
-        request_payload_s = message.payload.decode("utf-8")
-        request_payload_d = json.loads(request_payload_s)
-
-        print("message topic :", message.topic )
-        print("message payload :", request_payload_s )
-        print("message qos :", message.qos )
-        print("message retain flag :", message.retain )
-
-        command = request_payload_d["command"]
-        if command == "SayHello":
-
-            response_payload_d = {
-                "result" : "Hello"
-            }
-
-            print( "sending response :", request_payload_d["response_topic"], response_payload_d )
-
-            mqtt_client.publish( request_payload_d["response_topic"], json.dumps(response_payload_d) )
-
-        else:
-            raise ValueError(f"Unknown command {command}")
-
-    mqtt_client.on_connect = on_connect
-    mqtt_client.on_message = on_message
-
-    broker = "broker.emqx.io"
-    port = 1883
-
-    mqtt_client.connect( broker, port )
-
-    mqtt_client.subscribe("panorama/remote_command/request")
-
-    mqtt_client.loop_forever()
+mqtt_client.loop_forever()

@@ -4,49 +4,52 @@ import time
 
 import paho.mqtt.client as mqtt
 
+class MqttRequester:
 
-mqtt_client = mqtt.Client( "my_mqtt_client4" )
-remote_command_results = {}
+    def __init__(self):
 
+        self.mqtt_client = mqtt.Client( "my_mqtt_client4" )
+        self.remote_command_results = {}
 
-def on_connect( client, userdata, flags, rc ):
+        self.mqtt_client.on_connect = self.on_connect
+        self.mqtt_client.on_message = self.on_message
 
-    print( "on_connect", [ client, userdata, flags, rc ] )
-    
-    if rc != 0:
-        print("Connection to broker failed %d\n" % rc)
+        broker = "broker.emqx.io"
+        port = 1883
 
-def on_message( client, userdata, message ):
+        self.mqtt_client.connect( broker, port )
 
-    print( "on_message", [ client, userdata, message ] )
+        self.mqtt_client.loop_start()
 
-    response_payload_s = message.payload.decode("utf-8")
-    response_payload_d = json.loads(response_payload_s)
+    def shutdown(self):
+        self.mqtt_client.loop_stop()
 
-    print("message topic :", message.topic )
-    print("message payload :", response_payload_s )
-    print("message qos :", message.qos )
-    print("message retain flag :", message.retain )
+    def on_connect( self, client, userdata, flags, rc ):
 
-    if message.topic.startswith("panorama/remote_command/response/"):
-        remote_command_results[message.topic] = response_payload_d
+        if 0:
+            print( "on_connect", [ client, userdata, flags, rc ] )
+        
+        if rc != 0:
+            print("Connection to broker failed %d\n" % rc)
 
-mqtt_client.on_connect = on_connect
-mqtt_client.on_message = on_message
+    def on_message( self, client, userdata, message ):
 
-broker = "broker.emqx.io"
-port = 1883
+        if 0:
+            print( "on_message", [ client, userdata, message ] )
 
-print("Connecting")
-mqtt_client.connect( broker, port )
+        response_payload_s = message.payload.decode("utf-8")
+        response_payload_d = json.loads(response_payload_s)
 
-# one way message
-if 0:
-    mqtt_client.publish("panorama/test1","Hello MQTT")
+        if 0:
+            print("message topic :", message.topic )
+            print("message payload :", response_payload_s )
+            print("message qos :", message.qos )
+            print("message retain flag :", message.retain )
 
-# request-response
-if 1:
-    def invoke_remote_command( command ):
+        if message.topic.startswith("panorama/remote_command/response/"):
+            self.remote_command_results[message.topic] = response_payload_d
+
+    def invoke_remote_command( self, command ):
 
         remote_command_id = str(uuid.uuid4())
 
@@ -57,29 +60,33 @@ if 1:
             "response_topic" : response_topic,
         }
 
-        mqtt_client.subscribe(response_topic)
+        self.mqtt_client.subscribe(response_topic)
 
         print("sending request", request_payload_d )
-        mqtt_client.publish("panorama/remote_command/request", json.dumps(request_payload_d) )
+        self.mqtt_client.publish("panorama/remote_command/request", json.dumps(request_payload_d) )
 
         # FIXME : Should handle timeout also
         result = None
         while True:
-            if response_topic in remote_command_results:
-                result = remote_command_results[response_topic]
+            if response_topic in self.remote_command_results:
+                result = self.remote_command_results[response_topic]
                 break
             time.sleep(0.1)
 
-        mqtt_client.unsubscribe(response_topic)
+        self.mqtt_client.unsubscribe(response_topic)
 
         return result
 
-mqtt_client.loop_start()
+mqtt_requester = MqttRequester()
 
-result = invoke_remote_command("SayHello")
-print("result :", result)
+try:
+    while True:
 
-while True:
-    time.sleep(0.1)
+        result = mqtt_requester.invoke_remote_command("SayHello")
+        print("result :", result)
 
-mqtt_client.loop_stop()
+        time.sleep(1)
+except KeyboardInterrupt:
+    pass
+
+mqtt_requester.shutdown()
