@@ -35,5 +35,6 @@ clean:
 	rm $(INSTALL_DIR)/$(TARGET_NAME) || true
 
 run:
+	rm trace.log || true
 	$(INSTALL_DIR)/$(TARGET_NAME)
 
