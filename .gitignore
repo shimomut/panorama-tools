@@ -1,2 +1,4 @@
 sm_yolov5/work-*
 mlops_nvds/data
+memory_leak_detection/build
+memory_leak_detection/output
