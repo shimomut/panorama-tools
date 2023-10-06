@@ -4,22 +4,14 @@
 #include <malloc.h>
 #include <dlfcn.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include <cstdlib>
 #include <thread>
 #include <mutex>
 
-std::mutex mtx;
-
-static void* (*old_malloc_hook)(size_t, const void*);
-static void* (*old_memalign_hook)(size_t, size_t, const void*);
-static void* (*old_realloc_hook)(void*, size_t, const void*);
-static void (*old_free_hook)(void*, const void*);
-
-static void * my_malloc_hook (size_t size, const void *caller);
-static void * my_memalign_hook (size_t align, size_t size, const void *caller);
-static void * my_realloc_hook (void * old_p, size_t size, const void *caller);
-static void my_free_hook (void *ptr, const void *caller);
+static const size_t BUFFER_SIZE = 100000;
+//static const size_t BUFFER_SIZE = 10;
 
 enum MallocOperation
 {
@@ -36,10 +28,46 @@ struct MallocCallHistory
     const char * symbol_name;
 };
 
-static MallocCallHistory malloc_call_history[100000];
-static size_t malloc_call_history_size = 0;
+struct Globals
+{
+    Globals()
+        :
+        old_malloc_hook(0),
+        old_memalign_hook(0),
+        old_realloc_hook(0),
+        old_free_hook(0),
+        malloc_call_history_size(0)
+    {
+        memset( malloc_call_history, 0, sizeof(malloc_call_history) );
+    }
 
-static int in_hook = 0;
+    std::recursive_mutex mtx;
+
+    void* (*old_malloc_hook)(size_t, const void*);
+    void* (*old_memalign_hook)(size_t, size_t, const void*);
+    void* (*old_realloc_hook)(void*, size_t, const void*);
+    void (*old_free_hook)(void*, const void*);
+
+    MallocCallHistory malloc_call_history[BUFFER_SIZE];
+    size_t malloc_call_history_size;
+
+    std::string output_filename;
+};
+
+static Globals g;
+
+static void * my_malloc_hook (size_t size, const void *caller);
+static void * my_memalign_hook (size_t align, size_t size, const void *caller);
+static void * my_realloc_hook (void * old_p, size_t size, const void *caller);
+static void my_free_hook (void *ptr, const void *caller);
+
+static inline void backup_hooks()
+{
+    g.old_malloc_hook = __malloc_hook;
+    g.old_memalign_hook = __memalign_hook;
+    g.old_realloc_hook = __realloc_hook;
+    g.old_free_hook = __free_hook;
+}
 
 static inline void enable_hooks()
 {
@@ -51,32 +79,61 @@ static inline void enable_hooks()
 
 static inline void disable_hooks()
 {
-    __malloc_hook = old_malloc_hook;
-    __memalign_hook = old_memalign_hook;
-    __realloc_hook = old_realloc_hook;
-    __free_hook = old_free_hook;
+    __malloc_hook = g.old_malloc_hook;
+    __memalign_hook = g.old_memalign_hook;
+    __realloc_hook = g.old_realloc_hook;
+    __free_hook = g.old_free_hook;
+}
+
+static void flush_malloc_call_history()
+{
+    std::lock_guard<std::recursive_mutex> lock(g.mtx);
+
+    if( g.malloc_call_history_size > 0 )
+    {
+        int fd = open( g.output_filename.c_str(), O_CREAT | O_WRONLY | O_APPEND, 0644 );
+
+        for( size_t i=0 ; i<g.malloc_call_history_size ; ++i )
+        {
+            char buf[1024];
+            int len = snprintf( buf, sizeof(buf)-1, "{\"op\":%d,\"p\":\"%p\",\"size\":%zd,\"module\":\"%s\",\"symbol\":\"%s\"}\n", 
+                g.malloc_call_history[i].op,
+                g.malloc_call_history[i].p,
+                g.malloc_call_history[i].size,
+                g.malloc_call_history[i].module_name,
+                g.malloc_call_history[i].symbol_name );
+            
+            write( fd, buf, len );
+        }
+
+        close(fd);
+
+        g.malloc_call_history_size = 0;
+    }
 }
 
 static inline void add_malloc_call_history( MallocOperation op, void * p, size_t size, const void * caller )
 {
+    if( g.malloc_call_history_size==BUFFER_SIZE )
+    {
+        flush_malloc_call_history();
+    }
+
     Dl_info dl_info;
     dladdr( caller, &dl_info );
 
-    malloc_call_history[malloc_call_history_size].op = op;
-    malloc_call_history[malloc_call_history_size].p = p;
-    malloc_call_history[malloc_call_history_size].size = size;
-    malloc_call_history[malloc_call_history_size].module_name = dl_info.dli_fname;
-    malloc_call_history[malloc_call_history_size].symbol_name = dl_info.dli_sname;
+    g.malloc_call_history[g.malloc_call_history_size].op = op;
+    g.malloc_call_history[g.malloc_call_history_size].p = p;
+    g.malloc_call_history[g.malloc_call_history_size].size = size;
+    g.malloc_call_history[g.malloc_call_history_size].module_name = dl_info.dli_fname;
+    g.malloc_call_history[g.malloc_call_history_size].symbol_name = dl_info.dli_sname;
 
-    malloc_call_history_size ++;
+    g.malloc_call_history_size ++;
 }
 
 static void * my_malloc_hook (size_t size, const void *caller)
 {
-    mtx.lock();
-
-    if(in_hook){abort();}
-    in_hook++;
+    g.mtx.lock();
 
     disable_hooks();
 
@@ -87,19 +144,14 @@ static void * my_malloc_hook (size_t size, const void *caller)
 
     enable_hooks();
 
-    in_hook--;
-
-    mtx.unlock();
+    g.mtx.unlock();
 
     return p;
 }
 
 static void * my_memalign_hook (size_t align, size_t size, const void *caller)
 {
-    mtx.lock();
-
-    if(in_hook){abort();}
-    in_hook++;
+    std::lock_guard<std::recursive_mutex> lock(g.mtx);
 
     disable_hooks();
     
@@ -110,19 +162,12 @@ static void * my_memalign_hook (size_t align, size_t size, const void *caller)
 
     enable_hooks();
 
-    in_hook--;
-
-    mtx.unlock();
-
     return p;
 }
 
 static void * my_realloc_hook (void * old_p, size_t size, const void *caller)
 {
-    mtx.lock();
-
-    if(in_hook){abort();}
-    in_hook++;
+    std::lock_guard<std::recursive_mutex> lock(g.mtx);
 
     disable_hooks();
     
@@ -134,19 +179,12 @@ static void * my_realloc_hook (void * old_p, size_t size, const void *caller)
 
     enable_hooks();
 
-    in_hook--;
-
-    mtx.unlock();
-
     return p;
 }
 
 static void my_free_hook(void * p, const void *caller)
 {
-    mtx.lock();
-
-    if(in_hook){abort();}
-    in_hook++;
+    std::lock_guard<std::recursive_mutex> lock(g.mtx);
 
     disable_hooks();
 
@@ -156,10 +194,6 @@ static void my_free_hook(void * p, const void *caller)
     free(p);
 
     enable_hooks();
-
-    in_hook--;
-
-    mtx.unlock();
 }
 
 void allocate_and_free_many_times()
@@ -169,70 +203,45 @@ void allocate_and_free_many_times()
         size_t size = std::rand() % (1024 * 1024);
         
         void * p = malloc(size);
+        printf("allocated %p\n", p);
 
         usleep( std::rand() % (1000) );
         
+        printf("freeing %p\n", p);
         free(p);
     }
 }
 
+static void malloc_free_trace_start( const char * output_filename )
+{
+    g.output_filename = output_filename;
+
+    backup_hooks();
+    enable_hooks();
+}
+
+static void malloc_free_trace_stop()
+{
+    disable_hooks();
+
+    flush_malloc_call_history();
+}
+
 int main( int argc, const char * argv[] )
 {
-    // back up old hook functions
-    old_malloc_hook = __malloc_hook;
-    old_memalign_hook = __memalign_hook;
-    old_realloc_hook = __realloc_hook;
-    old_free_hook = __free_hook;
-
-    enable_hooks();
+    malloc_free_trace_start( "./trace.log" );
     
-    printf("Hello malloc hook test\n");
-
     std::thread t1( allocate_and_free_many_times );
     std::thread t2( allocate_and_free_many_times );
     std::thread t3( allocate_and_free_many_times );
     std::thread t4( allocate_and_free_many_times );
-
-    /*
-    for( int i=0 ; i<10 ; ++i )
-    {
-        void * p = malloc( 1024 * 1024 );
-        //void * p = memalign( 64, 1024 * 1024 );
-        if(p==0){abort();}
-
-        void * p2 = realloc( p, 2 * 1024 * 1024 );
-        if(p2==0){abort();}
-        p = NULL;
-
-        if(p2)
-        {
-            free(p2);
-        }
-
-        if(p)
-        {
-            free(p);
-        }
-    }
-    */
 
     t1.join();
     t2.join();
     t3.join();
     t4.join();
 
-    disable_hooks();
-
-    // print malloc operation history
-    for( size_t i=0 ; i<malloc_call_history_size ; ++i )
-    {
-        printf( "%d, %p, %zd, %s, %s\n", 
-            malloc_call_history[i].op,
-            malloc_call_history[i].p,
-            malloc_call_history[i].size,
-            malloc_call_history[i].module_name,
-            malloc_call_history[i].symbol_name );
-    }
+    malloc_free_trace_stop();
 
     return 0;
 }
