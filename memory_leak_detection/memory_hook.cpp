@@ -3,13 +3,22 @@
 #include <string.h>
 #include <malloc.h>
 #include <dlfcn.h>
+#include <unistd.h>
+
+#include <cstdlib>
+#include <thread>
+#include <mutex>
+
+std::mutex mtx;
 
 static void* (*old_malloc_hook)(size_t, const void*);
 static void* (*old_memalign_hook)(size_t, size_t, const void*);
 static void* (*old_realloc_hook)(void*, size_t, const void*);
 static void (*old_free_hook)(void*, const void*);
 
-//static void * my_malloc_hook (size_t size, const void *caller);
+static void * my_malloc_hook (size_t size, const void *caller);
+static void * my_memalign_hook (size_t align, size_t size, const void *caller);
+static void * my_realloc_hook (void * old_p, size_t size, const void *caller);
 static void my_free_hook (void *ptr, const void *caller);
 
 enum MallocOperation
@@ -32,6 +41,22 @@ static size_t malloc_call_history_size = 0;
 
 static int in_hook = 0;
 
+static inline void enable_hooks()
+{
+    __malloc_hook = my_malloc_hook;
+    __memalign_hook = my_memalign_hook;
+    __realloc_hook = my_realloc_hook;
+    __free_hook = my_free_hook;
+}
+
+static inline void disable_hooks()
+{
+    __malloc_hook = old_malloc_hook;
+    __memalign_hook = old_memalign_hook;
+    __realloc_hook = old_realloc_hook;
+    __free_hook = old_free_hook;
+}
+
 static inline void add_malloc_call_history( MallocOperation op, void * p, size_t size, const void * caller )
 {
     Dl_info dl_info;
@@ -48,53 +73,58 @@ static inline void add_malloc_call_history( MallocOperation op, void * p, size_t
 
 static void * my_malloc_hook (size_t size, const void *caller)
 {
+    mtx.lock();
+
     if(in_hook){abort();}
     in_hook++;
 
-    // Restore all old hooks
-    __malloc_hook = old_malloc_hook;
-    
+    disable_hooks();
+
     // Call recursively
     void * p = malloc(size);
 
     add_malloc_call_history( MallocOperation_Alloc, p, size, caller );
 
-    // Restore our own hooks */
-    __malloc_hook = my_malloc_hook;
+    enable_hooks();
 
     in_hook--;
+
+    mtx.unlock();
 
     return p;
 }
 
 static void * my_memalign_hook (size_t align, size_t size, const void *caller)
 {
+    mtx.lock();
+
     if(in_hook){abort();}
     in_hook++;
 
-    // Restore all old hooks
-    __memalign_hook = old_memalign_hook;
+    disable_hooks();
     
     // Call recursively
     void * p = memalign(align,size);
 
     add_malloc_call_history( MallocOperation_Alloc, p, size, caller );
 
-    // Restore our own hooks */
-    __memalign_hook = my_memalign_hook;
+    enable_hooks();
 
     in_hook--;
+
+    mtx.unlock();
 
     return p;
 }
 
 static void * my_realloc_hook (void * old_p, size_t size, const void *caller)
 {
+    mtx.lock();
+
     if(in_hook){abort();}
     in_hook++;
 
-    // Restore all old hooks
-    __realloc_hook = old_realloc_hook;
+    disable_hooks();
     
     // Call recursively
     void * p = realloc(old_p,size);
@@ -102,52 +132,72 @@ static void * my_realloc_hook (void * old_p, size_t size, const void *caller)
     add_malloc_call_history( MallocOperation_Free, old_p, 0, caller );
     add_malloc_call_history( MallocOperation_Alloc, p, size, caller );
 
-    // Restore our own hooks */
-    __realloc_hook = my_realloc_hook;
+    enable_hooks();
 
     in_hook--;
+
+    mtx.unlock();
 
     return p;
 }
 
 static void my_free_hook(void * p, const void *caller)
 {
+    mtx.lock();
+
     if(in_hook){abort();}
     in_hook++;
 
-    // Restore all old hooks
-    __free_hook = old_free_hook;
+    disable_hooks();
 
     add_malloc_call_history( MallocOperation_Free, p, 0, caller );
 
     // Call recursively
     free(p);
 
-    // Restore our own hooks
-    __free_hook = my_free_hook;
+    enable_hooks();
 
     in_hook--;
+
+    mtx.unlock();
+}
+
+void allocate_and_free_many_times()
+{
+    for( int i=0 ; i<1000 ; ++i )
+    {
+        size_t size = std::rand() % (1024 * 1024);
+        
+        void * p = malloc(size);
+
+        usleep( std::rand() % (1000) );
+        
+        free(p);
+    }
 }
 
 int main( int argc, const char * argv[] )
 {
-    // install hook functions
+    // back up old hook functions
     old_malloc_hook = __malloc_hook;
     old_memalign_hook = __memalign_hook;
     old_realloc_hook = __realloc_hook;
     old_free_hook = __free_hook;
-    __malloc_hook = my_malloc_hook;
-    __memalign_hook = my_memalign_hook;
-    __realloc_hook = my_realloc_hook;
-    __free_hook = my_free_hook;
+
+    enable_hooks();
     
     printf("Hello malloc hook test\n");
 
+    std::thread t1( allocate_and_free_many_times );
+    std::thread t2( allocate_and_free_many_times );
+    std::thread t3( allocate_and_free_many_times );
+    std::thread t4( allocate_and_free_many_times );
+
+    /*
     for( int i=0 ; i<10 ; ++i )
     {
-        //void * p = malloc( 1024 * 1024 );
+        void * p = malloc( 1024 * 1024 );
         //void * p = memalign( 64, 1024 * 1024 );
-        void * p = calloc( 10, 1024 * 1024 );
         if(p==0){abort();}
 
         void * p2 = realloc( p, 2 * 1024 * 1024 );
@@ -164,12 +214,14 @@ int main( int argc, const char * argv[] )
             free(p);
         }
     }
+    */
 
-    // uninstall hook functions
-    __malloc_hook = old_malloc_hook;
-    __memalign_hook = old_memalign_hook;
-    __realloc_hook = old_realloc_hook;
-    __free_hook = old_free_hook;
+    t1.join();
+    t2.join();
+    t3.join();
+    t4.join();
+
+    disable_hooks();
 
     // print malloc operation history
     for( size_t i=0 ; i<malloc_call_history_size ; ++i )
