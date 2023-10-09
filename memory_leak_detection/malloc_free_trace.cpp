@@ -10,19 +10,30 @@
 #include <thread>
 #include <mutex>
 
+#include "Python.h"
+
+//-----
+
+#define MODULE_NAME "malloc_free_trace"
+
 static const size_t BUFFER_SIZE = 100000;
 //static const size_t BUFFER_SIZE = 10;
+//static const size_t BUFFER_SIZE = 1;
+
+//-----
 
 enum MallocOperation
 {
     MallocOperation_Alloc = 1,
-    MallocOperation_Free = 2
+    MallocOperation_Free = 2,
+    MallocOperation_Realloc = 3
 };
 
 struct MallocCallHistory
 {
     MallocOperation op;
     void * p;
+    void * p2;
     size_t size;
     const char * module_name;
     const char * symbol_name;
@@ -96,9 +107,10 @@ static void flush_malloc_call_history()
         for( size_t i=0 ; i<g.malloc_call_history_size ; ++i )
         {
             char buf[1024];
-            int len = snprintf( buf, sizeof(buf)-1, "{\"op\":%d,\"p\":\"%p\",\"size\":%zd,\"module\":\"%s\",\"symbol\":\"%s\"}\n", 
+            int len = snprintf( buf, sizeof(buf)-1, "{\"op\":%d,\"p\":\"%p\",\"p2\":\"%p\",\"size\":%zd,\"module\":\"%s\",\"symbol\":\"%s\"}\n", 
                 g.malloc_call_history[i].op,
                 g.malloc_call_history[i].p,
+                g.malloc_call_history[i].p2,
                 g.malloc_call_history[i].size,
                 g.malloc_call_history[i].module_name,
                 g.malloc_call_history[i].symbol_name );
@@ -112,7 +124,7 @@ static void flush_malloc_call_history()
     }
 }
 
-static inline void add_malloc_call_history( MallocOperation op, void * p, size_t size, const void * caller )
+static inline void add_malloc_call_history( MallocOperation op, void * p, void * p2, size_t size, const void * caller )
 {
     if( g.malloc_call_history_size==BUFFER_SIZE )
     {
@@ -124,6 +136,7 @@ static inline void add_malloc_call_history( MallocOperation op, void * p, size_t
 
     g.malloc_call_history[g.malloc_call_history_size].op = op;
     g.malloc_call_history[g.malloc_call_history_size].p = p;
+    g.malloc_call_history[g.malloc_call_history_size].p2 = p2;
     g.malloc_call_history[g.malloc_call_history_size].size = size;
     g.malloc_call_history[g.malloc_call_history_size].module_name = dl_info.dli_fname;
     g.malloc_call_history[g.malloc_call_history_size].symbol_name = dl_info.dli_sname;
@@ -140,7 +153,7 @@ static void * my_malloc_hook (size_t size, const void *caller)
     // Call recursively
     void * p = malloc(size);
 
-    add_malloc_call_history( MallocOperation_Alloc, p, size, caller );
+    add_malloc_call_history( MallocOperation_Alloc, p, NULL, size, caller );
 
     enable_hooks();
 
@@ -158,7 +171,7 @@ static void * my_memalign_hook (size_t align, size_t size, const void *caller)
     // Call recursively
     void * p = memalign(align,size);
 
-    add_malloc_call_history( MallocOperation_Alloc, p, size, caller );
+    add_malloc_call_history( MallocOperation_Alloc, p, NULL, size, caller );
 
     enable_hooks();
 
@@ -172,14 +185,13 @@ static void * my_realloc_hook (void * old_p, size_t size, const void *caller)
     disable_hooks();
     
     // Call recursively
-    void * p = realloc(old_p,size);
+    void * new_p = realloc(old_p,size);
 
-    add_malloc_call_history( MallocOperation_Free, old_p, 0, caller );
-    add_malloc_call_history( MallocOperation_Alloc, p, size, caller );
+    add_malloc_call_history( MallocOperation_Realloc, old_p, new_p, 0, caller );
 
     enable_hooks();
 
-    return p;
+    return new_p;
 }
 
 static void my_free_hook(void * p, const void *caller)
@@ -188,28 +200,12 @@ static void my_free_hook(void * p, const void *caller)
 
     disable_hooks();
 
-    add_malloc_call_history( MallocOperation_Free, p, 0, caller );
+    add_malloc_call_history( MallocOperation_Free, p, NULL, 0, caller );
 
     // Call recursively
     free(p);
 
     enable_hooks();
-}
-
-void allocate_and_free_many_times()
-{
-    for( int i=0 ; i<1000 ; ++i )
-    {
-        size_t size = std::rand() % (1024 * 1024);
-        
-        void * p = malloc(size);
-        printf("allocated %p\n", p);
-
-        usleep( std::rand() % (1000) );
-        
-        printf("freeing %p\n", p);
-        free(p);
-    }
 }
 
 static void malloc_free_trace_start( const char * output_filename )
@@ -225,6 +221,23 @@ static void malloc_free_trace_stop()
     disable_hooks();
 
     flush_malloc_call_history();
+}
+
+/*
+void allocate_and_free_many_times()
+{
+    for( int i=0 ; i<1000 ; ++i )
+    {
+        size_t size = std::rand() % (1024 * 1024);
+        
+        void * p = malloc(size);
+        printf("allocated %p\n", p);
+
+        usleep( std::rand() % (1000) );
+        
+        printf("freeing %p\n", p);
+        free(p);
+    }
 }
 
 int main( int argc, const char * argv[] )
@@ -244,5 +257,68 @@ int main( int argc, const char * argv[] )
     malloc_free_trace_stop();
 
     return 0;
+}
+*/
+
+static PyObject * _start(PyObject* self, PyObject* args, PyObject * kwds)
+{
+    const char * filename;
+
+    static const char * kwlist[] = {
+        "filename",
+        NULL
+    };
+
+    if( ! PyArg_ParseTupleAndKeywords( args, kwds, "s", const_cast<char**>(kwlist), &filename ) )
+    {
+        return NULL;
+    }
+
+    malloc_free_trace_start(filename);
+    
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+static PyObject * _stop(PyObject* self, PyObject* args, PyObject * kwds)
+{
+    if( ! PyArg_ParseTuple( args, "" ) )
+    {
+        return NULL;
+    }
+
+    malloc_free_trace_stop();
+    
+    Py_INCREF(Py_None);
+    return Py_None;
+}
+
+static PyMethodDef malloc_free_trace_funcs[] =
+{
+    { "start", (PyCFunction)_start, METH_VARARGS|METH_KEYWORDS, "Start tracing malloc/free calls." },
+    { "stop", (PyCFunction)_stop, METH_VARARGS|METH_KEYWORDS, "Stop tracing malloc/free calls." },
+    {NULL, NULL, 0, NULL}
+};
+
+static PyModuleDef malloc_free_trace_module =
+{
+    PyModuleDef_HEAD_INIT,
+    MODULE_NAME,
+    "malloc_free_trace module.",
+    -1,
+    malloc_free_trace_funcs,
+    NULL, NULL, NULL, NULL
+};
+
+//-----
+
+extern "C" PyMODINIT_FUNC PyInit_malloc_free_trace(void)
+{
+    PyObject * m;
+
+    m = PyModule_Create(&malloc_free_trace_module);
+    if(m == NULL) return NULL;
+    
+    return m;
 }
 
