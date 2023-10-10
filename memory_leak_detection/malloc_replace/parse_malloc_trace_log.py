@@ -55,7 +55,23 @@ with open( args.logfile, "r" ) as fd:
         else:
             assert f"Unknown operation : {op}"
 
+stats = {}
+
 print("---")
-print("Remaining memory allocations:")
-for k, v in allocated_memories.items():
-    print( k, v )
+print("Remaining memory blocks:")
+for p, (size,return_addr) in allocated_memories.items():
+    print( p, size,return_addr )
+
+    return_addr_s = json.dumps(return_addr)
+
+    if return_addr_s not in stats:
+        stats[return_addr_s] = [ 0, 0 ]
+    
+    stats[return_addr_s][0] += 1 # number of blocks
+    stats[return_addr_s][1] += size # total size
+
+print("---")
+print("Num remaining memory blocks and total size:")
+for caller, (num_blocks,total_size) in stats.items():
+    print( caller, ": num blocks:", num_blocks, ": total size:", total_size )
+
