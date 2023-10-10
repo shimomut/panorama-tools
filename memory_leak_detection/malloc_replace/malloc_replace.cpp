@@ -238,17 +238,8 @@ void free( void * p )
     g.mtx.unlock();
 }
 
-int main( int argc, const char * argv[] )
+void test()
 {
-    // use backtrace to implicitly initialize libgcc.
-    // Are there better solution?
-    {
-        void * bt[30];
-        backtrace( bt, sizeof(bt)/sizeof(bt[0]) );
-    }
-
-    malloc_free_trace_start("./malloc_trace.log");
-
     {
         void * p = malloc(100);
         free(p);
@@ -280,6 +271,20 @@ int main( int argc, const char * argv[] )
         free(p1);
         free(p2);
     }
+}
+
+int main( int argc, const char * argv[] )
+{
+    // use backtrace to implicitly initialize libgcc.
+    // Are there better solution?
+    {
+        void * bt[30];
+        backtrace( bt, sizeof(bt)/sizeof(bt[0]) );
+    }
+
+    malloc_free_trace_start("./malloc_trace.log");
+
+    //test();
 
     wchar_t * wargv[100];
     for( int i=0 ; i<argc ; ++i )
