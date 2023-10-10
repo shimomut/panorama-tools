@@ -89,14 +89,13 @@ static void flush_malloc_call_history()
                 const char * format;
                 if( level<NUM_RETURN_ADDR_LEVELS-1 )
                 {
-                    format = "{\"addr\":\"%p\",\"module\":\"%s\",\"symbol\":\"%s\"},";
+                    format = "{\"module\":\"%s\",\"symbol\":\"%s\"},";
                 }
                 else
                 {
-                    format = "{\"addr\":\"%p\",\"module\":\"%s\",\"symbol\":\"%s\"}";
+                    format = "{\"module\":\"%s\",\"symbol\":\"%s\"}";
                 }
                 len = snprintf( buf, sizeof(buf)-1, format, 
-                    g.malloc_call_history[i].return_addr[level],
                     dl_info.dli_fname,
                     dl_info.dli_sname);
                 write( fd, buf, len );
@@ -243,6 +242,22 @@ int main( int argc, const char * argv[] )
     {
         void * p = malloc(100);
         free(p);
+    }
+
+    {
+        void * p = memalign(64,100);
+        free(p);
+    }
+
+    {
+        void * p = calloc(10,100);
+        free(p);
+    }
+
+    {
+        void * p = malloc(100);
+        void * p2 = realloc(p,200);
+        free(p2);
     }
 
     {
