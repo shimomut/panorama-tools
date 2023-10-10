@@ -5,6 +5,7 @@
 #include <dlfcn.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <execinfo.h>
 
 #include <cstdlib>
@@ -60,6 +61,8 @@ struct Globals
 };
 
 static Globals g;
+
+// ---
 
 static void flush_malloc_call_history()
 {
@@ -160,6 +163,8 @@ static void malloc_free_trace_stop()
     flush_malloc_call_history();
 }
 
+// ---
+
 void * malloc( size_t size )
 {
     g.mtx.lock();
@@ -238,6 +243,123 @@ void free( void * p )
     g.mtx.unlock();
 }
 
+void * aligned_alloc( size_t align, size_t size )
+{
+    const char msg[] = "aligned_alloc called\n";
+    ssize_t result = write( STDOUT_FILENO, msg, sizeof(msg) );
+    (void)result;
+
+    abort();
+
+    return NULL;
+}
+
+void * valloc( size_t size )
+{
+    const char msg[] = "valloc called\n";
+    ssize_t result = write( STDOUT_FILENO, msg, sizeof(msg) );
+    (void)result;
+
+    abort();
+
+    return NULL;
+}
+
+void * pvalloc( size_t size )
+{
+    const char msg[] = "pvalloc called\n";
+    ssize_t result = write( STDOUT_FILENO, msg, sizeof(msg) );
+    (void)result;
+
+    abort();
+
+    return NULL;
+}
+
+int posix_memalign( void **memptr, size_t align, size_t size )
+{
+    g.mtx.lock();
+
+    //const char msg[] = "posix_memalign called\n";
+    //ssize_t result = write( STDOUT_FILENO, msg, sizeof(msg) );
+    //(void)result;
+
+    void * p = dlmemalign( align, size );
+
+    add_malloc_call_history( MallocOperation_Alloc, p, NULL, size );
+
+    *memptr = p;
+
+    g.mtx.unlock();
+
+    return 0;
+}
+
+size_t malloc_usable_size(void *ptr)
+{
+    const char msg[] = "malloc_usable_size called\n";
+    ssize_t result = write( STDOUT_FILENO, msg, sizeof(msg) );
+    (void)result;
+
+    abort();
+
+    return 0;
+}
+
+// ---
+
+static void _signal_handler(int sig)
+{
+    // Be careful to use only signal-safe functions
+    // https://man7.org/linux/man-pages/man7/signal-safety.7.html
+
+    // get backtrace in the array
+    void *array[30];
+    size_t size;
+    size = backtrace( array, sizeof(array)/sizeof(array[0]) );
+
+    // print heading error message line
+    const char msg[] = "Error: caught signal - ";
+    size_t result = write( STDERR_FILENO, msg, sizeof(msg)-1 );
+    (void)result;
+
+    const char * signal_name = strsignal(sig);
+    result = write( STDERR_FILENO, signal_name, strlen(signal_name) );
+    (void)result;
+
+    const char msg2[] = ":\n";
+    result = write( STDERR_FILENO, msg2, sizeof(msg2)-1 );
+    (void)result;
+
+    // print backtrace to stderr
+    backtrace_symbols_fd(array, size, STDERR_FILENO);
+
+    // exit the process with signal-safe version of exit function
+    //_exit(1);
+}
+
+void install_signal_handler()
+{
+    int signalnums[] = {
+        SIGABRT,
+        SIGBUS,
+        SIGFPE,
+        SIGHUP,
+        SIGILL,
+        SIGINT,
+        SIGKILL,
+        SIGSEGV,
+        SIGTERM
+    };
+
+    for( size_t i=0 ; i<sizeof(signalnums)/sizeof(signalnums[0]) ; ++i  )
+    {
+        signal( signalnums[i], _signal_handler);
+    }
+}
+
+// ---
+
 void test()
 {
     {
@@ -271,6 +393,12 @@ void test()
         free(p1);
         free(p2);
     }
+
+    {
+        void * p = 0;
+        int result = posix_memalign( &p, 128, 1024 );
+        printf( "posix_memalign result : %d, %p\n", result, p );
+    }
 }
 
 int main( int argc, const char * argv[] )
@@ -281,6 +409,8 @@ int main( int argc, const char * argv[] )
         void * bt[30];
         backtrace( bt, sizeof(bt)/sizeof(bt[0]) );
     }
+
+    install_signal_handler();
 
     malloc_free_trace_start("./malloc_trace.log");
 
