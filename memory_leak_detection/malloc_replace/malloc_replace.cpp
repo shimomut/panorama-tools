@@ -74,12 +74,16 @@ static void flush_malloc_call_history()
             char buf[1024];
             int len;
 
-            len = snprintf( buf, sizeof(buf)-1, "{\"op\":%d,\"p\":\"%p\",\"p2\":\"%p\",\"size\":%zd,\"return_addr\":[", 
-                g.malloc_call_history[i].op,
-                g.malloc_call_history[i].p,
-                g.malloc_call_history[i].p2,
-                g.malloc_call_history[i].size );
-            write( fd, buf, len );
+            {
+                len = snprintf( buf, sizeof(buf)-1, "{\"op\":%d,\"p\":\"%p\",\"p2\":\"%p\",\"size\":%zd,\"return_addr\":[", 
+                    g.malloc_call_history[i].op,
+                    g.malloc_call_history[i].p,
+                    g.malloc_call_history[i].p2,
+                    g.malloc_call_history[i].size );
+
+                ssize_t result = write( fd, buf, len );
+                (void)result;
+            }
 
             for( size_t level=0 ; level<NUM_RETURN_ADDR_LEVELS ; ++level )
             {
@@ -98,11 +102,17 @@ static void flush_malloc_call_history()
                 len = snprintf( buf, sizeof(buf)-1, format, 
                     dl_info.dli_fname,
                     dl_info.dli_sname);
-                write( fd, buf, len );
+                
+                ssize_t result = write( fd, buf, len );
+                (void)result;
             }
 
-            const char msg[] = "]}\n";
-            write( fd, msg, sizeof(msg)-1 );
+            {
+                const char msg[] = "]}\n";
+                
+                ssize_t result = write( fd, msg, sizeof(msg)-1 );
+                (void)result;
+            }
         }
 
         close(fd);
@@ -129,8 +139,8 @@ static inline void add_malloc_call_history( MallocOperation op, void * p, void *
     g.malloc_call_history[g.malloc_call_history_size].size = size;
 
     void * bt[NUM_RETURN_ADDR_LEVELS+1] = {0};
-    size_t num_bt_returned = backtrace( bt, sizeof(bt)/sizeof(bt[0]) );
-    for( int level=0 ; level<NUM_RETURN_ADDR_LEVELS ; ++level )
+    backtrace( bt, sizeof(bt)/sizeof(bt[0]) );
+    for( size_t level=0 ; level<NUM_RETURN_ADDR_LEVELS ; ++level )
     {
         g.malloc_call_history[g.malloc_call_history_size].return_addr[level] = bt[level+1];
     }
@@ -234,7 +244,7 @@ int main( int argc, const char * argv[] )
     // Are there better solution?
     {
         void * bt[30];
-        size_t num_bt_returned = backtrace( bt, sizeof(bt)/sizeof(bt[0]) );
+        backtrace( bt, sizeof(bt)/sizeof(bt[0]) );
     }
 
     malloc_free_trace_start("./malloc_trace.log");
@@ -263,11 +273,14 @@ int main( int argc, const char * argv[] )
     {
         void * p1 = malloc(100);
         void * p2 = malloc(100);
+
+        // intentionally cause memory leak
+        p1 = NULL;
         
+        free(p1);
         free(p2);
     }
 
-    /*
     wchar_t * wargv[100];
     for( int i=0 ; i<argc ; ++i )
     {
@@ -284,9 +297,8 @@ int main( int argc, const char * argv[] )
     {
         PyMem_RawFree(wargv[i]);
     }
-    */
 
     malloc_free_trace_stop();
 
-    return 0;
+    return result;
 }
