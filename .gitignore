@@ -1,8 +1,5 @@
 sm_yolov5/work-*
 mlops_nvds/data
-memory_leak_detection/malloc_hook/build
-memory_leak_detection/malloc_hook/*.log
-memory_leak_detection/malloc_hook/*.so
 memory_leak_detection/malloc_replace/build
 memory_leak_detection/malloc_replace/*.log
 memory_leak_detection/malloc_replace/malloc_replace
