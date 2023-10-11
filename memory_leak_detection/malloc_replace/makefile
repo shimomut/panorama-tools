@@ -21,11 +21,11 @@ all: $(INSTALL_DIR)/$(TARGET_NAME)
 
 $(BUILD_TMP)/%.o: %.cpp
 	mkdir -p $(BUILD_TMP)
-	$(COMPILER) -pthread -DNDEBUG -g -fwrapv $(OPTIMIZATION) -Wall -g -fstack-protector-strong -Wformat -Werror=format-security -Wdate-time -D_FORTIFY_SOURCE=2 -fPIC -I/usr/local/include/python3.8 -c $< -o $@
+	$(COMPILER) -pthread -DNDEBUG -g -fwrapv $(OPTIMIZATION) -Wall -g -fstack-protector-strong -Wformat -Werror=format-security -Wdate-time -D_FORTIFY_SOURCE=2 -fPIC -I/usr/include/python3.8 -I/usr/local/include/python3.8 -c $< -o $@
 
 $(BUILD_TMP)/%.o: %.c
 	mkdir -p $(BUILD_TMP)
-	$(COMPILER) -pthread -DNDEBUG -g -fwrapv $(OPTIMIZATION) -Wall -g -fstack-protector-strong -Wformat -Werror=format-security -Wdate-time -D_FORTIFY_SOURCE=2 -fPIC -I/usr/local/include/python3.8 -c $< -o $@
+	$(COMPILER) -pthread -DNDEBUG -g -fwrapv $(OPTIMIZATION) -Wall -g -fstack-protector-strong -Wformat -Werror=format-security -Wdate-time -D_FORTIFY_SOURCE=2 -fPIC -I/usr/include/python3.8 -I/usr/local/include/python3.8 -c $< -o $@
 
 $(BUILD_LIB)/$(TARGET_NAME) : $(BUILD_TMP)/malloc_replace.o $(BUILD_TMP)/dlmalloc.o
 	mkdir -p $(BUILD_LIB)

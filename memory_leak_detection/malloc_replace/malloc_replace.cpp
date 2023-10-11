@@ -381,8 +381,35 @@ extern "C" void * pvalloc( size_t size )
     return NULL;
 }
 
+static bool is_power_of_2( size_t n )
+{
+    if(n==0)
+    {
+        return false;
+    }
+
+    while( n!=1 )
+    {
+        if( n%2 != 0 )
+        {
+            return false;
+        }
+
+        n = n/2;
+    }
+
+    return true;
+}
+
 extern "C" int posix_memalign( void **memptr, size_t align, size_t size )
 {
+    CHECK_POINT();
+
+    if( ! is_power_of_2(align) )
+    {
+        return EINVAL;
+    }
+
     CHECK_POINT();
 
     std::lock_guard<std::recursive_mutex> lock(g.mtx);
@@ -398,6 +425,13 @@ extern "C" int posix_memalign( void **memptr, size_t align, size_t size )
     add_malloc_call_history( MallocOperation_Alloc, p, NULL, size );
 
     *memptr = p;
+
+    CHECK_POINT();
+
+    if(!p)
+    {
+        return ENOMEM;
+    }
 
     CHECK_POINT();
 
