@@ -24,6 +24,85 @@ static const size_t NUM_RETURN_ADDR_LEVELS = 2;
 
 //-----
 
+static const int NUM_CHECK_POINT_HISTORY = 30;
+
+struct CheckPoint
+{
+    CheckPoint( const char * _filename=NULL, const char * _funcname=NULL, int _lineno=0 )
+        :
+        filename(_filename),
+        funcname(_funcname),
+        lineno(_lineno)
+    {
+    }
+
+    const char * filename;
+    const char * funcname;
+    int lineno;
+};
+
+struct CheckPointHistory
+{
+    CheckPointHistory()
+        :
+        next_index(0)
+    {
+    }
+
+    void Check( const char * _filename, const char * _funcname, int _lineno )
+    {
+        std::lock_guard<std::recursive_mutex> lock(mtx);
+
+        check_points[next_index] = CheckPoint( _filename, _funcname, _lineno );
+        next_index = (next_index+1) % NUM_CHECK_POINT_HISTORY;
+    }
+
+    void Print()
+    {
+        const char header[] = "Check points:\n";
+        size_t result = write( STDERR_FILENO, header, sizeof(header)-1 );
+        (void)result;
+
+        std::lock_guard<std::recursive_mutex> lock(mtx);
+
+        for( int i=0 ; i<NUM_CHECK_POINT_HISTORY ; ++i )
+        {
+            int index = (next_index+i) % NUM_CHECK_POINT_HISTORY;
+            if( check_points[index].filename )
+            {
+                size_t result = write( STDERR_FILENO, check_points[index].filename, strlen(check_points[index].filename) );
+                (void)result;
+
+                const char hyphen[] = " - ";
+                result = write( STDERR_FILENO, hyphen, sizeof(hyphen)-1 );
+                (void)result;
+
+                result = write( STDERR_FILENO, check_points[index].funcname, strlen(check_points[index].funcname) );
+                (void)result;
+
+                result = write( STDERR_FILENO, hyphen, sizeof(hyphen)-1 );
+                (void)result;
+
+                char buf[32];
+                int len = snprintf( buf, sizeof(buf)-1, "%d\n", check_points[index].lineno );
+                result = write( STDERR_FILENO, buf, len );
+                (void)result;
+            }
+        }
+    }
+
+    std::recursive_mutex mtx;
+
+    CheckPoint check_points[NUM_CHECK_POINT_HISTORY];
+    int next_index;
+};
+
+static CheckPointHistory check_point_history;
+
+#define CHECK_POINT() check_point_history.Check(__FILE__,__func__,__LINE__)
+
+//-----
+
 enum MallocOperation
 {
     MallocOperation_Alloc = 1,
@@ -165,9 +244,13 @@ static void malloc_free_trace_stop()
 
 // ---
 
-void * malloc( size_t size )
+extern "C" void * malloc( size_t size )
 {
-    g.mtx.lock();
+    CHECK_POINT();
+
+    std::lock_guard<std::recursive_mutex> lock(g.mtx);
+
+    CHECK_POINT();
 
     //const char msg[] = "malloc called\n";
     //write( STDOUT_FILENO, msg, sizeof(msg) );
@@ -176,14 +259,18 @@ void * malloc( size_t size )
 
     add_malloc_call_history( MallocOperation_Alloc, p, NULL, size );
 
-    g.mtx.unlock();
+    CHECK_POINT();
 
     return p;
 }
 
-void * memalign( size_t align, size_t size )
+extern "C" void * memalign( size_t align, size_t size )
 {
-    g.mtx.lock();
+    CHECK_POINT();
+
+    std::lock_guard<std::recursive_mutex> lock(g.mtx);
+
+    CHECK_POINT();
 
     //const char msg[] = "memalign called\n";
     //write( STDOUT_FILENO, msg, sizeof(msg) );
@@ -192,14 +279,18 @@ void * memalign( size_t align, size_t size )
 
     add_malloc_call_history( MallocOperation_Alloc, p, NULL, size );
 
-    g.mtx.unlock();
+    CHECK_POINT();
 
     return p;
 }
 
-void * calloc( size_t n, size_t size )
+extern "C" void * calloc( size_t n, size_t size )
 {
-    g.mtx.lock();
+    CHECK_POINT();
+
+    std::lock_guard<std::recursive_mutex> lock(g.mtx);
+
+    CHECK_POINT();
 
     //const char msg[] = "calloc called\n";
     //write( STDOUT_FILENO, msg, sizeof(msg) );
@@ -208,14 +299,18 @@ void * calloc( size_t n, size_t size )
 
     add_malloc_call_history( MallocOperation_Alloc, p, NULL, size );
 
-    g.mtx.unlock();
+    CHECK_POINT();
 
     return p;
 }
 
-void * realloc( void * old_p, size_t size )
+extern "C" void * realloc( void * old_p, size_t size )
 {
-    g.mtx.lock();
+    CHECK_POINT();
+
+    std::lock_guard<std::recursive_mutex> lock(g.mtx);
+
+    CHECK_POINT();
 
     //const char msg[] = "realloc called\n";
     //write( STDOUT_FILENO, msg, sizeof(msg) );
@@ -224,14 +319,18 @@ void * realloc( void * old_p, size_t size )
 
     add_malloc_call_history( MallocOperation_Realloc, old_p, new_p, size );
 
-    g.mtx.unlock();
+    CHECK_POINT();
 
     return new_p;
 }
 
-void free( void * p )
+extern "C" void free( void * p )
 {
-    g.mtx.lock();
+    CHECK_POINT();
+
+    std::lock_guard<std::recursive_mutex> lock(g.mtx);
+
+    CHECK_POINT();
 
     //const char msg[] = "free called\n";
     //write( STDOUT_FILENO, msg, sizeof(msg) );
@@ -240,11 +339,13 @@ void free( void * p )
 
     dlfree(p);
 
-    g.mtx.unlock();
+    CHECK_POINT();
 }
 
-void * aligned_alloc( size_t align, size_t size )
+extern "C" void * aligned_alloc( size_t align, size_t size )
 {
+    CHECK_POINT();
+
     const char msg[] = "aligned_alloc called\n";
     ssize_t result = write( STDOUT_FILENO, msg, sizeof(msg) );
     (void)result;
@@ -254,8 +355,10 @@ void * aligned_alloc( size_t align, size_t size )
     return NULL;
 }
 
-void * valloc( size_t size )
+extern "C" void * valloc( size_t size )
 {
+    CHECK_POINT();
+
     const char msg[] = "valloc called\n";
     ssize_t result = write( STDOUT_FILENO, msg, sizeof(msg) );
     (void)result;
@@ -265,8 +368,10 @@ void * valloc( size_t size )
     return NULL;
 }
 
-void * pvalloc( size_t size )
+extern "C" void * pvalloc( size_t size )
 {
+    CHECK_POINT();
+
     const char msg[] = "pvalloc called\n";
     ssize_t result = write( STDOUT_FILENO, msg, sizeof(msg) );
     (void)result;
@@ -276,9 +381,13 @@ void * pvalloc( size_t size )
     return NULL;
 }
 
-int posix_memalign( void **memptr, size_t align, size_t size )
+extern "C" int posix_memalign( void **memptr, size_t align, size_t size )
 {
-    g.mtx.lock();
+    CHECK_POINT();
+
+    std::lock_guard<std::recursive_mutex> lock(g.mtx);
+
+    CHECK_POINT();
 
     //const char msg[] = "posix_memalign called\n";
     //ssize_t result = write( STDOUT_FILENO, msg, sizeof(msg) );
@@ -290,13 +399,15 @@ int posix_memalign( void **memptr, size_t align, size_t size )
 
     *memptr = p;
 
-    g.mtx.unlock();
+    CHECK_POINT();
 
     return 0;
 }
 
-size_t malloc_usable_size(void *ptr)
+extern "C" size_t malloc_usable_size(void *ptr)
 {
+    CHECK_POINT();
+
     const char msg[] = "malloc_usable_size called\n";
     ssize_t result = write( STDOUT_FILENO, msg, sizeof(msg) );
     (void)result;
@@ -310,6 +421,8 @@ size_t malloc_usable_size(void *ptr)
 
 static void _signal_handler(int sig)
 {
+    check_point_history.Print();
+
     // Be careful to use only signal-safe functions
     // https://man7.org/linux/man-pages/man7/signal-safety.7.html
 
@@ -397,12 +510,15 @@ void test()
     {
         void * p = 0;
         int result = posix_memalign( &p, 128, 1024 );
-        printf( "posix_memalign result : %d, %p\n", result, p );
+        (void)result;
+        free(p);
     }
 }
 
 int main( int argc, const char * argv[] )
 {
+    int result = 0;
+
     // use backtrace to implicitly initialize libgcc.
     // Are there better solution?
     {
@@ -424,7 +540,7 @@ int main( int argc, const char * argv[] )
 
     Py_Initialize();
 
-    int result = Py_Main(argc, wargv);
+    result = Py_Main(argc, wargv);
 
     Py_Finalize();
 
@@ -434,6 +550,8 @@ int main( int argc, const char * argv[] )
     }
 
     malloc_free_trace_stop();
+
+    check_point_history.Print();
 
     return result;
 }
