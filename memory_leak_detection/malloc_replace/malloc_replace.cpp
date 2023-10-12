@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <execinfo.h>
 #include <gnu/lib-names.h>
+#include <pthread.h>
 
 #include <cstdlib>
 #include <thread>
@@ -21,11 +22,12 @@
 #define USE_MALLOC_HISTORY
 #define USE_LOCK_IN_MALLOC
 #define USE_CHECK_POINT_HISTORY
+#define USE_BUILTIN_RETURN_ADDR // backtrace() sometimes doesn't return. Use __builtin_return_address instead.
 
 static const size_t MALLOC_CALL_HISTORY_SIZE = 100000;
-static const size_t NUM_RETURN_ADDR_LEVELS = 2; // This configuration has big impact on the performance.
+static const size_t NUM_RETURN_ADDR_LEVELS = 1; // This configuration has big impact on the performance.
 static const size_t PRELIMINARY_HEAP_SIZE = 10 * 1024 * 1024;
-static const size_t NUM_CHECK_POINT_HISTORY = 30;
+static const size_t NUM_CHECK_POINT_HISTORY = 50;
 
 //-----
 
@@ -75,17 +77,19 @@ static inline bool preliminary_heap_in_range( void * p )
 
 struct CheckPoint
 {
-    CheckPoint( const char * _filename=NULL, const char * _funcname=NULL, int _lineno=0 )
+    CheckPoint( const char * _filename=NULL, const char * _funcname=NULL, int _lineno=0, pthread_t _thread_id=0 )
         :
         filename(_filename),
         funcname(_funcname),
-        lineno(_lineno)
+        lineno(_lineno),
+        thread_id(_thread_id)
     {
     }
 
     const char * filename;
     const char * funcname;
     int lineno;
+    pthread_t thread_id;
 };
 
 struct CheckPointHistory
@@ -100,7 +104,7 @@ struct CheckPointHistory
     {
         std::lock_guard<std::recursive_mutex> lock(mtx);
 
-        check_points[next_index] = CheckPoint( _filename, _funcname, _lineno );
+        check_points[next_index] = CheckPoint( _filename, _funcname, _lineno, pthread_self() );
         next_index = (next_index+1) % NUM_CHECK_POINT_HISTORY;
     }
 
@@ -115,7 +119,7 @@ struct CheckPointHistory
             int index = (next_index+i) % NUM_CHECK_POINT_HISTORY;
             if( check_points[index].filename )
             {
-                my_printf("%s - %s - %d\n", check_points[index].filename, check_points[index].funcname, check_points[index].lineno );
+                my_printf("%s - %s - %d - %p\n", check_points[index].filename, check_points[index].funcname, check_points[index].lineno, check_points[index].thread_id );
             }
         }
     }
@@ -193,14 +197,20 @@ static Globals g;
 
 static void flush_malloc_call_history()
 {
+    CHECK_POINT();
+    
     std::lock_guard<std::recursive_mutex> lock(g.mtx);
 
     if( g.malloc_call_history_size > 0 )
     {
+        CHECK_POINT();
+    
         int fd = open( g.output_filename.c_str(), O_CREAT | O_WRONLY | O_APPEND, 0644 );
 
         for( size_t i=0 ; i<g.malloc_call_history_size ; ++i )
         {
+            CHECK_POINT();
+
             char buf[1024];
             int len;
 
@@ -217,21 +227,18 @@ static void flush_malloc_call_history()
 
             for( size_t level=0 ; level<NUM_RETURN_ADDR_LEVELS ; ++level )
             {
-                Dl_info dl_info;
-                dladdr( g.malloc_call_history[i].return_addr[level], &dl_info );
-
+                CHECK_POINT();
+                
                 const char * format;
                 if( level<NUM_RETURN_ADDR_LEVELS-1 )
                 {
-                    format = "{\"module\":\"%s\",\"symbol\":\"%s\"},";
+                    format = "%p,";
                 }
                 else
                 {
-                    format = "{\"module\":\"%s\",\"symbol\":\"%s\"}";
+                    format = "%p";
                 }
-                len = snprintf( buf, sizeof(buf)-1, format, 
-                    dl_info.dli_fname,
-                    dl_info.dli_sname);
+                len = snprintf( buf, sizeof(buf)-1, format, g.malloc_call_history[i].return_addr[level] );
                 
                 ssize_t result = write( fd, buf, len );
                 (void)result;
@@ -245,10 +252,14 @@ static void flush_malloc_call_history()
             }
         }
 
+        CHECK_POINT();
+
         close(fd);
 
         g.malloc_call_history_size = 0;
     }
+
+    CHECK_POINT();
 }
 
 static inline void add_malloc_call_history( MallocOperation op, void * p, void * p2, size_t size )
@@ -270,12 +281,21 @@ static inline void add_malloc_call_history( MallocOperation op, void * p, void *
 
     if(NUM_RETURN_ADDR_LEVELS>0)
     {
+        CHECK_POINT();
+
+        #if defined(USE_BUILTIN_RETURN_ADDR)
+        for( size_t level=0 ; level<NUM_RETURN_ADDR_LEVELS ; ++level )
+        {
+            g.malloc_call_history[g.malloc_call_history_size].return_addr[level] = __builtin_return_address(0);
+        }
+        #else //defined(USE_BUILTIN_RETURN_ADDR)
         void * bt[NUM_RETURN_ADDR_LEVELS+1] = {0};
         backtrace( bt, sizeof(bt)/sizeof(bt[0]) );
         for( size_t level=0 ; level<NUM_RETURN_ADDR_LEVELS ; ++level )
         {
             g.malloc_call_history[g.malloc_call_history_size].return_addr[level] = bt[level+1];
         }
+        #endif //defined(USE_BUILTIN_RETURN_ADDR)
     }
 
     g.malloc_call_history_size ++;
@@ -424,7 +444,14 @@ extern "C" void * realloc( void * old_p, size_t size )
 
     if(p_realloc)
     {
-        new_p = (*p_realloc)( old_p, size );
+        if( preliminary_heap_in_range(old_p) )
+        {
+            new_p = mspace_realloc( g_msp, old_p, size );
+        }
+        else
+        {
+            new_p = (*p_realloc)( old_p, size );
+        }
     }
     else
     {
@@ -490,10 +517,14 @@ extern "C" void free( void * p )
 
     if( preliminary_heap_in_range(p) )
     {
+        CHECK_POINT();
+
         mspace_free( g_msp, p );
     }
     else
     {
+        CHECK_POINT();
+
         (*p_free)(p);
     }
 
