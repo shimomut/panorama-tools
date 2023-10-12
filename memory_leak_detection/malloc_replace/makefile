@@ -44,7 +44,7 @@ run:
 	time $(INSTALL_DIR)/$(TARGET_NAME) ./test.py
 
 parse:
-	python3.8 ./parse_malloc_trace_log.py malloc_trace.log
+	python3.8 ./parse_malloc_trace_log.py --logfile malloc_trace.log --mapfile memory_map.txt
 
 $(BUILD_TMP)/malloc_replace.o : malloc_replace.cpp
 $(BUILD_TMP)/dlmalloc.o : dlmalloc.c

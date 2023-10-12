@@ -4,7 +4,8 @@ import json
 # ---
 
 argparser = argparse.ArgumentParser( description='parse malloc/free trace log and detect issues' )
-argparser.add_argument('logfile', action='store', help='trace log filename')
+argparser.add_argument('--mapfile', action='store', required=True, help='memory map filename (/proc/{pid}/maps format)')
+argparser.add_argument('--logfile', action='store', required=True, help='trace log filename')
 args = argparser.parse_args()
 
 # ---
