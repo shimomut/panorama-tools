@@ -42,7 +42,9 @@ with open( args.logfile, "r" ) as fd:
 
             p2 = d["p2"]
 
-            if p not in allocated_memories:
+            if p=="(nil)":
+                pass            
+            elif p not in allocated_memories:
                 print(f"Warning : [realloc] freeing unknown memory {p}")
             else:
                 del allocated_memories[p]
