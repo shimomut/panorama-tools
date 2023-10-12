@@ -13,7 +13,7 @@ BUILD_LIB = $(BUILD_DIR)/lib.$(BUILD_DIR_PLATFORM_SUFFIX)
 INSTALL_DIR = .
 
 #OPTIMIZATION = -O0
-OPTIMIZATION = -O2
+OPTIMIZATION = -O3
 
 # ---
 
@@ -42,6 +42,8 @@ clean:
 run:
 	rm malloc_trace.log || true
 	$(INSTALL_DIR)/$(TARGET_NAME) ./test.py
+
+parse:
 	python3.8 ./parse_malloc_trace_log.py malloc_trace.log
 
 $(BUILD_TMP)/malloc_replace.o : malloc_replace.cpp
