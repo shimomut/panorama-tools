@@ -18,13 +18,14 @@
 //-----
 
 #define REPLACE_MALLOC_FREE
-#define USE_CHECK_POINT_HISTORY
 #define USE_MALLOC_HISTORY
 #define USE_LOCK_IN_MALLOC
+#define USE_CHECK_POINT_HISTORY
 
-static const size_t BUFFER_SIZE = 100000;
-
-static const size_t NUM_RETURN_ADDR_LEVELS = 2;
+static const size_t MALLOC_CALL_HISTORY_SIZE = 100000;
+static const size_t NUM_RETURN_ADDR_LEVELS = 2; // This configuration has big impact on the performance.
+static const size_t PRELIMINARY_HEAP_SIZE = 10 * 1024 * 1024;
+static const size_t NUM_CHECK_POINT_HISTORY = 30;
 
 //-----
 
@@ -45,7 +46,7 @@ static void my_printf( const char * fmt, ... )
 
 //-----
 
-static char mpace_buffer[10 * 1024 * 1024];
+static char preliminary_heap_buffer[PRELIMINARY_HEAP_SIZE];
 
 typedef void * mspace;
 extern "C" mspace create_mspace_with_base(void* base, size_t capacity, int locked);
@@ -57,22 +58,20 @@ extern "C" void mspace_free(mspace msp, void* mem);
 
 static mspace g_msp;
 
-static void preliminary_heap_init()
+static void preliminary_heap_init_once()
 {
     if(!g_msp)
     {
-        g_msp = create_mspace_with_base( mpace_buffer, sizeof(mpace_buffer), 1 );
+        g_msp = create_mspace_with_base( preliminary_heap_buffer, sizeof(preliminary_heap_buffer), 1 );
     }
 }
 
 static inline bool preliminary_heap_in_range( void * p )
 {
-    return ( mpace_buffer<=p && p<mpace_buffer + sizeof(mpace_buffer) );
+    return ( preliminary_heap_buffer<=p && p<preliminary_heap_buffer + sizeof(preliminary_heap_buffer) );
 }
 
 //-----
-
-static const int NUM_CHECK_POINT_HISTORY = 30;
 
 struct CheckPoint
 {
@@ -107,34 +106,16 @@ struct CheckPointHistory
 
     void Print()
     {
-        const char header[] = "Check points:\n";
-        size_t result = write( STDERR_FILENO, header, sizeof(header)-1 );
-        (void)result;
+        my_printf("Check points:\n");
 
         std::lock_guard<std::recursive_mutex> lock(mtx);
 
-        for( int i=0 ; i<NUM_CHECK_POINT_HISTORY ; ++i )
+        for( size_t i=0 ; i<NUM_CHECK_POINT_HISTORY ; ++i )
         {
             int index = (next_index+i) % NUM_CHECK_POINT_HISTORY;
             if( check_points[index].filename )
             {
-                size_t result = write( STDERR_FILENO, check_points[index].filename, strlen(check_points[index].filename) );
-                (void)result;
-
-                const char hyphen[] = " - ";
-                result = write( STDERR_FILENO, hyphen, sizeof(hyphen)-1 );
-                (void)result;
-
-                result = write( STDERR_FILENO, check_points[index].funcname, strlen(check_points[index].funcname) );
-                (void)result;
-
-                result = write( STDERR_FILENO, hyphen, sizeof(hyphen)-1 );
-                (void)result;
-
-                char buf[32];
-                int len = snprintf( buf, sizeof(buf)-1, "%d\n", check_points[index].lineno );
-                result = write( STDERR_FILENO, buf, len );
-                (void)result;
+                my_printf("%s - %s - %d\n", check_points[index].filename, check_points[index].funcname, check_points[index].lineno );
             }
         }
     }
@@ -200,7 +181,7 @@ struct Globals
 
     bool enabled;
 
-    MallocCallHistory malloc_call_history[BUFFER_SIZE];
+    MallocCallHistory malloc_call_history[MALLOC_CALL_HISTORY_SIZE];
     size_t malloc_call_history_size;
 
     std::string output_filename;
@@ -277,7 +258,7 @@ static inline void add_malloc_call_history( MallocOperation op, void * p, void *
         return;
     }
 
-    if( g.malloc_call_history_size==BUFFER_SIZE )
+    if( g.malloc_call_history_size==MALLOC_CALL_HISTORY_SIZE )
     {
         flush_malloc_call_history();
     }
@@ -287,11 +268,14 @@ static inline void add_malloc_call_history( MallocOperation op, void * p, void *
     g.malloc_call_history[g.malloc_call_history_size].p2 = p2;
     g.malloc_call_history[g.malloc_call_history_size].size = size;
 
-    void * bt[NUM_RETURN_ADDR_LEVELS+1] = {0};
-    backtrace( bt, sizeof(bt)/sizeof(bt[0]) );
-    for( size_t level=0 ; level<NUM_RETURN_ADDR_LEVELS ; ++level )
+    if(NUM_RETURN_ADDR_LEVELS>0)
     {
-        g.malloc_call_history[g.malloc_call_history_size].return_addr[level] = bt[level+1];
+        void * bt[NUM_RETURN_ADDR_LEVELS+1] = {0};
+        backtrace( bt, sizeof(bt)/sizeof(bt[0]) );
+        for( size_t level=0 ; level<NUM_RETURN_ADDR_LEVELS ; ++level )
+        {
+            g.malloc_call_history[g.malloc_call_history_size].return_addr[level] = bt[level+1];
+        }
     }
 
     g.malloc_call_history_size ++;
@@ -351,21 +335,17 @@ extern "C" void * malloc( size_t size )
 
     void * p;
 
-    if(!p_malloc)
-    {
-        if(!g_msp)
-        {
-            preliminary_heap_init();
-        }
-
-        p = mspace_malloc(g_msp,size);
-    }
-    else
+    if(p_malloc)
     {
         p = (*p_malloc)(size);
     }
+    else
+    {
+        preliminary_heap_init_once();
+        p = mspace_malloc(g_msp,size);
+    }
 
-    add_malloc_call_history( MallocOperation_Alloc, p, NULL, size );
+    ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, NULL, size );
 
     CHECK_POINT();
 
@@ -384,21 +364,17 @@ extern "C" void * memalign( size_t align, size_t size )
 
     void * p;
 
-    if(!p_memalign)
-    {
-        if(!g_msp)
-        {
-            preliminary_heap_init();
-        }
-
-        p = mspace_memalign( g_msp, align, size );
-    }
-    else
+    if(p_memalign)
     {
         p = (*p_memalign)( align, size );
     }
+    else
+    {
+        preliminary_heap_init_once();
+        p = mspace_memalign( g_msp, align, size );
+    }
 
-    add_malloc_call_history( MallocOperation_Alloc, p, NULL, size );
+    ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, NULL, size );
 
     CHECK_POINT();
 
@@ -417,21 +393,17 @@ extern "C" void * calloc( size_t n, size_t size )
 
     void * p;
 
-    if(!p_calloc)
-    {
-        if(!g_msp)
-        {
-            preliminary_heap_init();
-        }
-
-        p = mspace_calloc( g_msp, n, size );
-    }
-    else
+    if(p_calloc)
     {
         p = (*p_calloc)( n, size );
     }
+    else
+    {
+        preliminary_heap_init_once();
+        p = mspace_calloc( g_msp, n, size );
+    }
 
-    add_malloc_call_history( MallocOperation_Alloc, p, NULL, size );
+    ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, NULL, size );
 
     CHECK_POINT();
 
@@ -450,21 +422,17 @@ extern "C" void * realloc( void * old_p, size_t size )
 
     void * new_p;
 
-    if(!p_realloc)
-    {
-        if(!g_msp)
-        {
-            preliminary_heap_init();
-        }
-
-        new_p = mspace_realloc( g_msp, old_p, size );
-    }
-    else
+    if(p_realloc)
     {
         new_p = (*p_realloc)( old_p, size );
     }
+    else
+    {
+        preliminary_heap_init_once();
+        new_p = mspace_realloc( g_msp, old_p, size );
+    }
 
-    add_malloc_call_history( MallocOperation_Realloc, old_p, new_p, size );
+    ADD_MALLOC_CALL_HISTORY( MallocOperation_Realloc, old_p, new_p, size );
 
     CHECK_POINT();
 
@@ -481,9 +449,27 @@ extern "C" int posix_memalign( void **memptr, size_t align, size_t size )
 
     //my_printf( "posix_memalign called: align=%d, size=%d\n", align, size );
 
-    int result = (*p_posix_memalign)( memptr, align, size );
+    int result;
+    if(p_posix_memalign)
+    {
+        result = (*p_posix_memalign)( memptr, align, size );
+    }
+    else
+    {
+        preliminary_heap_init_once();
+        *memptr = mspace_memalign( g_msp, align, size );
 
-    add_malloc_call_history( MallocOperation_Alloc, *memptr, NULL, size );
+        if(*memptr)
+        {
+            result = 0;
+        }
+        else
+        {
+            result = ENOMEM;
+        }
+    }
+
+    ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, *memptr, NULL, size );
 
     CHECK_POINT();
 
@@ -500,7 +486,7 @@ extern "C" void free( void * p )
 
     //my_printf( "free called: p=%p\n", p );
 
-    add_malloc_call_history( MallocOperation_Free, p, NULL, 0 );
+    ADD_MALLOC_CALL_HISTORY( MallocOperation_Free, p, NULL, 0 );
 
     if( preliminary_heap_in_range(p) )
     {
@@ -675,25 +661,30 @@ int main( int argc, const char * argv[] )
 {
     int result = 0;
 
-    get_glibc_malloc();
-
-    // use backtrace to implicitly initialize libgcc.
-    // Are there better solution?
+    // Use backtrace to implicitly initialize libgcc.
+    // Otherwise, backtrace() calls cause recursive malloc calls.
+    // Is there better solution?
     {
         void * bt[30];
         backtrace( bt, sizeof(bt)/sizeof(bt[0]) );
     }
 
+    // Get glibc's malloc/free functions as pointers
+    get_glibc_malloc();
+
+    // Install signal handler for troubleshooting
     install_signal_handler();
 
+    // Start tracing malloc/free calls
     malloc_free_trace_start("./malloc_trace.log");
 
-    if(true)
+    if(false)
     {
         test();
     }
 
-    if(false)
+    // Run python
+    if(true)
     {
         wchar_t * wargv[100];
         for( int i=0 ; i<argc ; ++i )
@@ -713,6 +704,7 @@ int main( int argc, const char * argv[] )
         }
     }
 
+    // Stop tracing malloc/free calls, and flush the history
     malloc_free_trace_stop();
 
     #if defined(USE_CHECK_POINT_HISTORY)
