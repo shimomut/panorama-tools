@@ -41,7 +41,7 @@ clean:
 
 run:
 	rm malloc_trace.log || true
-	$(INSTALL_DIR)/$(TARGET_NAME) ./test.py
+	time $(INSTALL_DIR)/$(TARGET_NAME) ./test.py
 
 parse:
 	python3.8 ./parse_malloc_trace_log.py malloc_trace.log
