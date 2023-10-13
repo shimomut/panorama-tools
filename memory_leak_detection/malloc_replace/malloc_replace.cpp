@@ -146,6 +146,7 @@ typedef void * (*CallocFunc)(size_t,size_t);
 typedef void * (*ReallocFunc)(void*,size_t);
 typedef void (*FreeFunc)(void*);
 typedef int (*PosixMemalignFunc)(void**,size_t,size_t);
+typedef void * (*AlignedAllocFunc)(size_t,size_t);
 
 static MallocFunc p_malloc;
 static MemalignFunc p_memalign;
@@ -153,6 +154,7 @@ static CallocFunc p_calloc;
 static ReallocFunc p_realloc;
 static FreeFunc p_free;
 static PosixMemalignFunc p_posix_memalign;
+static AlignedAllocFunc p_aligned_alloc;
 
 
 enum MallocOperation
@@ -232,11 +234,11 @@ static void flush_malloc_call_history()
                 const char * format;
                 if( level<NUM_RETURN_ADDR_LEVELS-1 )
                 {
-                    format = "%p,";
+                    format = "\"%p\",";
                 }
                 else
                 {
-                    format = "%p";
+                    format = "\"%p\"";
                 }
                 len = snprintf( buf, sizeof(buf)-1, format, g.malloc_call_history[i].return_addr[level] );
                 
@@ -317,6 +319,7 @@ static void get_glibc_malloc()
         p_calloc = (CallocFunc)dlsym( libc, "calloc");
         p_realloc = (ReallocFunc)dlsym( libc, "realloc");
         p_posix_memalign = (PosixMemalignFunc)dlsym( libc, "posix_memalign");
+        p_aligned_alloc = (AlignedAllocFunc)dlsym( libc, "aligned_alloc");
         p_free = (FreeFunc)dlsym( libc, "free");
     }
 }
@@ -535,11 +538,36 @@ extern "C" void * aligned_alloc( size_t align, size_t size )
 {
     CHECK_POINT();
 
-    my_printf( "aligned_alloc called: align=%d, size=%d\n", align, size );
+    LOCK();
 
-    abort();
+    CHECK_POINT();
 
-    return NULL;
+    //my_printf( "aligned_alloc called: align=%d, size=%d\n", align, size );
+
+    void * p;
+
+    if(p_aligned_alloc)
+    {
+        p = (*p_aligned_alloc)( align, size );
+    }
+    else
+    {
+        if( size % align == 0 )
+        {
+            preliminary_heap_init_once();
+            p = mspace_memalign( g_msp, align, size );
+        }
+        else
+        {
+            p = NULL;
+        }
+    }
+
+    ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, NULL, size );
+
+    CHECK_POINT();
+
+    return p;
 }
 
 extern "C" void * valloc( size_t size )
