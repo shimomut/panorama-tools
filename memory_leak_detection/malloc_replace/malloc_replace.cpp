@@ -20,8 +20,7 @@
 
 #define REPLACE_MALLOC_FREE
 #define USE_MALLOC_HISTORY
-#define USE_LOCK_IN_MALLOC
-#define USE_CHECK_POINT_HISTORY
+//#define USE_CHECK_POINT_HISTORY
 #define USE_BUILTIN_RETURN_ADDR // backtrace() sometimes doesn't return. Use __builtin_return_address instead.
 
 static const size_t MALLOC_CALL_HISTORY_SIZE = 100000;
@@ -221,6 +220,8 @@ static void flush_malloc_call_history()
 
 static inline void add_malloc_call_history( MallocOperation op, void * p, void * p2, size_t size )
 {
+    std::lock_guard<std::recursive_mutex> lock(g.mtx);
+
     if(!g.enabled)
     {
         return;
@@ -280,12 +281,6 @@ static void malloc_free_trace_stop()
 
 #if defined(REPLACE_MALLOC_FREE)
 
-#if defined(USE_LOCK_IN_MALLOC)
-#define LOCK() std::lock_guard<std::recursive_mutex> lock(g.mtx)
-#else //defined(USE_LOCK_IN_MALLOC)
-#define LOCK() (void)0
-#endif //defined(USE_LOCK_IN_MALLOC)
-
 extern "C" void* __libc_malloc(size_t);
 extern "C" void* __libc_memalign(size_t, size_t);
 extern "C" void* __libc_calloc(size_t, size_t);
@@ -294,10 +289,6 @@ extern "C" void __libc_free(void*);
 
 extern "C" void * malloc( size_t size )
 {
-    CHECK_POINT();
-
-    LOCK();
-
     CHECK_POINT();
 
     //my_printf( "malloc called: size=%d\n", size );
@@ -315,10 +306,6 @@ extern "C" void * memalign( size_t align, size_t size )
 {
     CHECK_POINT();
 
-    LOCK();
-
-    CHECK_POINT();
-
     //my_printf( "memalign called: align=%d, size=%d\n", align, size );
 
     void * p = __libc_memalign( align, size );
@@ -334,10 +321,6 @@ extern "C" void * calloc( size_t n, size_t size )
 {
     CHECK_POINT();
 
-    LOCK();
-
-    CHECK_POINT();
-
     //my_printf( "calloc called: n=%d, size=%d\n", n, size );
 
     void * p = __libc_calloc( n, size );
@@ -351,10 +334,6 @@ extern "C" void * calloc( size_t n, size_t size )
 
 extern "C" void * realloc( void * old_p, size_t size )
 {
-    CHECK_POINT();
-
-    LOCK();
-
     CHECK_POINT();
 
     //my_printf( "realloc called: old_p=%p, size=%d\n", old_p, size );
@@ -375,10 +354,6 @@ static inline bool is_power_of_2( size_t x )
 
 extern "C" int posix_memalign( void **memptr, size_t align, size_t size )
 {
-    CHECK_POINT();
-
-    LOCK();
-
     CHECK_POINT();
 
     //my_printf( "posix_memalign called: align=%d, size=%d\n", align, size );
@@ -413,10 +388,6 @@ extern "C" void free( void * p )
 {
     CHECK_POINT();
 
-    LOCK();
-
-    CHECK_POINT();
-
     //my_printf( "free called: p=%p\n", p );
 
     ADD_MALLOC_CALL_HISTORY( MallocOperation_Free, p, NULL, 0 );
@@ -428,10 +399,6 @@ extern "C" void free( void * p )
 
 extern "C" void * aligned_alloc( size_t align, size_t size )
 {
-    CHECK_POINT();
-
-    LOCK();
-
     CHECK_POINT();
 
     //my_printf( "aligned_alloc called: align=%d, size=%d\n", align, size );

@@ -38,9 +38,9 @@ $(INSTALL_DIR)/$(TARGET_NAME) : $(BUILD_LIB)/$(TARGET_NAME)
 clean:
 	rm -rf $(BUILD_DIR)
 	rm $(INSTALL_DIR)/$(TARGET_NAME) || true
+	rm malloc_trace.*.log || true
 
 run:
-	rm malloc_trace.log || true
 	time $(INSTALL_DIR)/$(TARGET_NAME) ./test.py
 
 parse:
