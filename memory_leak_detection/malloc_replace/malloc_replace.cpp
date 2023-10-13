@@ -26,7 +26,6 @@
 
 static const size_t MALLOC_CALL_HISTORY_SIZE = 100000;
 static const size_t NUM_RETURN_ADDR_LEVELS = 1; // This configuration has big impact on the performance.
-static const size_t PRELIMINARY_HEAP_SIZE = 10 * 1024 * 1024;
 static const size_t NUM_CHECK_POINT_HISTORY = 50;
 
 //-----
@@ -44,33 +43,6 @@ static void my_printf( const char * fmt, ... )
 
     ssize_t result = write( STDOUT_FILENO, buf, len );
     (void)result;
-}
-
-//-----
-
-static char preliminary_heap_buffer[PRELIMINARY_HEAP_SIZE];
-
-typedef void * mspace;
-extern "C" mspace create_mspace_with_base(void* base, size_t capacity, int locked);
-extern "C" void* mspace_malloc(mspace msp, size_t bytes);
-extern "C" void* mspace_memalign(mspace msp, size_t alignment, size_t bytes);
-extern "C" void* mspace_calloc(mspace msp, size_t n, size_t bytes);
-extern "C" void* mspace_realloc(mspace msp, void* mem, size_t newsize);
-extern "C" void mspace_free(mspace msp, void* mem);
-
-static mspace g_msp;
-
-static void preliminary_heap_init_once()
-{
-    if(!g_msp)
-    {
-        g_msp = create_mspace_with_base( preliminary_heap_buffer, sizeof(preliminary_heap_buffer), 1 );
-    }
-}
-
-static inline bool preliminary_heap_in_range( void * p )
-{
-    return ( preliminary_heap_buffer<=p && p<preliminary_heap_buffer + sizeof(preliminary_heap_buffer) );
 }
 
 //-----
@@ -139,23 +111,6 @@ static CheckPointHistory check_point_history;
 #endif //defined(USE_CHECK_POINT_HISTORY)
 
 //-----
-
-typedef void * (*MallocFunc)(size_t);
-typedef void * (*MemalignFunc)(size_t,size_t);
-typedef void * (*CallocFunc)(size_t,size_t);
-typedef void * (*ReallocFunc)(void*,size_t);
-typedef void (*FreeFunc)(void*);
-typedef int (*PosixMemalignFunc)(void**,size_t,size_t);
-typedef void * (*AlignedAllocFunc)(size_t,size_t);
-
-static MallocFunc p_malloc;
-static MemalignFunc p_memalign;
-static CallocFunc p_calloc;
-static ReallocFunc p_realloc;
-static FreeFunc p_free;
-static PosixMemalignFunc p_posix_memalign;
-static AlignedAllocFunc p_aligned_alloc;
-
 
 enum MallocOperation
 {
@@ -309,21 +264,6 @@ static inline void add_malloc_call_history( MallocOperation op, void * p, void *
 #define ADD_MALLOC_CALL_HISTORY(op,p,p2,size) (void)0
 #endif //defined(USE_MALLOC_HISTORY)
 
-static void get_glibc_malloc()
-{
-    void * libc = dlopen(LIBC_SO, RTLD_LAZY);
-    if(libc)
-    {
-        p_malloc = (MallocFunc)dlsym( libc, "malloc");
-        p_memalign = (MemalignFunc)dlsym( libc, "memalign");
-        p_calloc = (CallocFunc)dlsym( libc, "calloc");
-        p_realloc = (ReallocFunc)dlsym( libc, "realloc");
-        p_posix_memalign = (PosixMemalignFunc)dlsym( libc, "posix_memalign");
-        p_aligned_alloc = (AlignedAllocFunc)dlsym( libc, "aligned_alloc");
-        p_free = (FreeFunc)dlsym( libc, "free");
-    }
-}
-
 static void malloc_free_trace_start( const char * output_filename )
 {
     g.output_filename = output_filename;
@@ -346,6 +286,12 @@ static void malloc_free_trace_stop()
 #define LOCK() (void)0
 #endif //defined(USE_LOCK_IN_MALLOC)
 
+extern "C" void* __libc_malloc(size_t);
+extern "C" void* __libc_memalign(size_t, size_t);
+extern "C" void* __libc_calloc(size_t, size_t);
+extern "C" void* __libc_realloc(void*, size_t);
+extern "C" void __libc_free(void*);
+
 extern "C" void * malloc( size_t size )
 {
     CHECK_POINT();
@@ -356,17 +302,7 @@ extern "C" void * malloc( size_t size )
 
     //my_printf( "malloc called: size=%d\n", size );
 
-    void * p;
-
-    if(p_malloc)
-    {
-        p = (*p_malloc)(size);
-    }
-    else
-    {
-        preliminary_heap_init_once();
-        p = mspace_malloc(g_msp,size);
-    }
+    void * p = __libc_malloc(size);
 
     ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, NULL, size );
 
@@ -385,17 +321,7 @@ extern "C" void * memalign( size_t align, size_t size )
 
     //my_printf( "memalign called: align=%d, size=%d\n", align, size );
 
-    void * p;
-
-    if(p_memalign)
-    {
-        p = (*p_memalign)( align, size );
-    }
-    else
-    {
-        preliminary_heap_init_once();
-        p = mspace_memalign( g_msp, align, size );
-    }
+    void * p = __libc_memalign( align, size );
 
     ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, NULL, size );
 
@@ -414,17 +340,7 @@ extern "C" void * calloc( size_t n, size_t size )
 
     //my_printf( "calloc called: n=%d, size=%d\n", n, size );
 
-    void * p;
-
-    if(p_calloc)
-    {
-        p = (*p_calloc)( n, size );
-    }
-    else
-    {
-        preliminary_heap_init_once();
-        p = mspace_calloc( g_msp, n, size );
-    }
+    void * p = __libc_calloc( n, size );
 
     ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, NULL, size );
 
@@ -443,30 +359,18 @@ extern "C" void * realloc( void * old_p, size_t size )
 
     //my_printf( "realloc called: old_p=%p, size=%d\n", old_p, size );
 
-    void * new_p;
-
-    if(p_realloc)
-    {
-        if( preliminary_heap_in_range(old_p) )
-        {
-            new_p = mspace_realloc( g_msp, old_p, size );
-        }
-        else
-        {
-            new_p = (*p_realloc)( old_p, size );
-        }
-    }
-    else
-    {
-        preliminary_heap_init_once();
-        new_p = mspace_realloc( g_msp, old_p, size );
-    }
+    void * new_p = __libc_realloc( old_p, size );
 
     ADD_MALLOC_CALL_HISTORY( MallocOperation_Realloc, old_p, new_p, size );
 
     CHECK_POINT();
 
     return new_p;
+}
+
+static inline bool is_power_of_2( size_t x )
+{
+    return (((x-1) & x)==0);
 }
 
 extern "C" int posix_memalign( void **memptr, size_t align, size_t size )
@@ -479,24 +383,23 @@ extern "C" int posix_memalign( void **memptr, size_t align, size_t size )
 
     //my_printf( "posix_memalign called: align=%d, size=%d\n", align, size );
 
-    int result;
-    if(p_posix_memalign)
+    if( align % sizeof(void*) != 0
+        || !is_power_of_2(align / sizeof(void*))
+        || align == 0)
     {
-        result = (*p_posix_memalign)( memptr, align, size );
+        return EINVAL;
+    }
+
+    int result;
+    *memptr = __libc_memalign(align, size);
+
+    if(*memptr)
+    {
+        result = 0;
     }
     else
     {
-        preliminary_heap_init_once();
-        *memptr = mspace_memalign( g_msp, align, size );
-
-        if(*memptr)
-        {
-            result = 0;
-        }
-        else
-        {
-            result = ENOMEM;
-        }
+        result = ENOMEM;
     }
 
     ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, *memptr, NULL, size );
@@ -518,18 +421,7 @@ extern "C" void free( void * p )
 
     ADD_MALLOC_CALL_HISTORY( MallocOperation_Free, p, NULL, 0 );
 
-    if( preliminary_heap_in_range(p) )
-    {
-        CHECK_POINT();
-
-        mspace_free( g_msp, p );
-    }
-    else
-    {
-        CHECK_POINT();
-
-        (*p_free)(p);
-    }
+    __libc_free(p);
 
     CHECK_POINT();
 }
@@ -544,24 +436,7 @@ extern "C" void * aligned_alloc( size_t align, size_t size )
 
     //my_printf( "aligned_alloc called: align=%d, size=%d\n", align, size );
 
-    void * p;
-
-    if(p_aligned_alloc)
-    {
-        p = (*p_aligned_alloc)( align, size );
-    }
-    else
-    {
-        if( size % align == 0 )
-        {
-            preliminary_heap_init_once();
-            p = mspace_memalign( g_msp, align, size );
-        }
-        else
-        {
-            p = NULL;
-        }
-    }
+    void * p = __libc_memalign( align, size );
 
     ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, NULL, size );
 
@@ -663,7 +538,7 @@ void install_signal_handler()
 
 // ---
 
-void test()
+void test_malloc_free()
 {
     for( int i=0 ; i<10000 ; ++i )
     {
@@ -720,17 +595,6 @@ int main( int argc, const char * argv[] )
 {
     int result = 0;
 
-    // Use backtrace to implicitly initialize libgcc.
-    // Otherwise, backtrace() calls cause recursive malloc calls.
-    // Is there better solution?
-    {
-        void * bt[30];
-        backtrace( bt, sizeof(bt)/sizeof(bt[0]) );
-    }
-
-    // Get glibc's malloc/free functions as pointers
-    get_glibc_malloc();
-
     // Install signal handler for troubleshooting
     install_signal_handler();
 
@@ -739,7 +603,7 @@ int main( int argc, const char * argv[] )
 
     if(false)
     {
-        test();
+        test_malloc_free();
     }
 
     // Run python

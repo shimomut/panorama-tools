@@ -27,9 +27,9 @@ $(BUILD_TMP)/%.o: %.c
 	mkdir -p $(BUILD_TMP)
 	$(COMPILER) -pthread -DNDEBUG -g -fwrapv $(OPTIMIZATION) -Wall -g -fstack-protector-strong -Wformat -Werror=format-security -Wdate-time -D_FORTIFY_SOURCE=2 -fPIC -I/usr/include/python3.8 -I/usr/local/include/python3.8 -c $< -o $@
 
-$(BUILD_LIB)/$(TARGET_NAME) : $(BUILD_TMP)/malloc_replace.o $(BUILD_TMP)/dlmalloc.o
+$(BUILD_LIB)/$(TARGET_NAME) : $(BUILD_TMP)/malloc_replace.o
 	mkdir -p $(BUILD_LIB)
-	$(LINKER) -pthread -Wl,-O1 -Wl,-Bsymbolic-functions -Wl,-Bsymbolic-functions -Wl,-z,relro -Wl,-Bsymbolic-functions -Wl,-z,relro -g -fstack-protector-strong -Wformat -Werror=format-security -Wdate-time -D_FORTIFY_SOURCE=2 $(BUILD_TMP)/malloc_replace.o $(BUILD_TMP)/dlmalloc.o -L/usr/local/lib -lpython3.8 -lutil -ldl -o $(BUILD_LIB)/$(TARGET_NAME)
+	$(LINKER) -pthread -Wl,-O1 -Wl,-Bsymbolic-functions -Wl,-Bsymbolic-functions -Wl,-z,relro -Wl,-Bsymbolic-functions -Wl,-z,relro -g -fstack-protector-strong -Wformat -Werror=format-security -Wdate-time -D_FORTIFY_SOURCE=2 $(BUILD_TMP)/malloc_replace.o -L/usr/local/lib -lpython3.8 -lutil -ldl -o $(BUILD_LIB)/$(TARGET_NAME)
 
 $(INSTALL_DIR)/$(TARGET_NAME) : $(BUILD_LIB)/$(TARGET_NAME)
 	mkdir -p $(INSTALL_DIR)
@@ -47,4 +47,3 @@ parse:
 	python3.8 ./parse_malloc_trace_log.py --logfile malloc_trace.log --mapfile memory_map.txt
 
 $(BUILD_TMP)/malloc_replace.o : malloc_replace.cpp
-$(BUILD_TMP)/dlmalloc.o : dlmalloc.c
