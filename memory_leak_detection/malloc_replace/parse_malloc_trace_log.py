@@ -151,7 +151,11 @@ class MallocTraceLogParser:
 
             for line in fd:
                 line = line.strip()
-                d = json.loads(line)
+                try:
+                    d = json.loads(line)
+                except json.decoder.JSONDecodeError:
+                    print( "Malformed JSON :", [line] )
+                    continue
 
                 #print(d)
 
@@ -208,8 +212,16 @@ class MallocTraceLogParser:
 
         print("---")
         print("Num remaining memory blocks and total size:")
-        for caller, (num_blocks,total_size) in self.stats.items():
-            print( caller, ": num blocks:", num_blocks, ": total size:", total_size )
+        total_size = 0
+        for caller in sorted(self.stats.keys()):
+            num_blocks, size = self.stats[caller]
+            total_size += size
+            print( caller, ": num blocks:", num_blocks, ": total size:", size )
+
+        print("---")
+        print("Total remaining size:", total_size)
+        
+        
 
 symbol_resolver = SymbolResolver()
 symbol_resolver.load_mapfile( args.mapfile )
