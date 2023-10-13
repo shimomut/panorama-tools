@@ -3,6 +3,7 @@ import argparse
 import json
 import re
 import subprocess
+import pprint
 
 # ---
 
@@ -63,6 +64,11 @@ class SymbolResolver:
                     filename = re_result.group(5)
 
                     if 'x' in mode:
+                    
+                        if offset != 0:
+                            print(line)
+                        assert offset==0
+
                         self.maps.append( MemoryMap(addr_range, offset, filename) )
 
         self.maps.sort()
@@ -76,20 +82,22 @@ class SymbolResolver:
 
             if memory_map.addr_range[0] <= addr < memory_map.addr_range[1]:
                 
-                addr_offset_in_module = addr - memory_map.offset
+                addr_offset_in_module = addr - memory_map.addr_range[0]
 
                 if memory_map.symbols is None:
                     memory_map.symbols = self.load_symbol_table( memory_map.filename )
 
                 for symbol in memory_map.symbols:
                     if symbol.addr_range[0] <= addr_offset_in_module < symbol.addr_range[1]:
-                        self.cache[addr] = symbol.name
-                        return symbol.name
+                        name = memory_map.filename + "::" + symbol.name
+                        self.cache[addr] = name
+                        return name
                     elif addr_offset_in_module < symbol.addr_range[0]:
                         break
 
-                self.cache[addr] = memory_map.filename
-                return memory_map.filename
+                name = memory_map.filename + "::" + "(unknown)"
+                self.cache[addr] = name
+                return name
 
             elif addr < memory_map.addr_range[0]:
                 break
@@ -98,9 +106,9 @@ class SymbolResolver:
             print("Symbol not found :", hex(addr) )
             sys.exit(1)
 
-        unknown = "(unknown)"
-        self.cache[addr] = unknown
-        return unknown
+        name = "(unknown)" + "::" + "(unknown)"
+        self.cache[addr] = name
+        return name
 
     def load_symbol_table( self, filename ):
 
@@ -199,10 +207,11 @@ class MallocTraceLogParser:
                 else:
                     assert f"Unknown operation : {op}"
 
-        print("---")
-        print("Remaining memory blocks:")
+        print("")
+        print("Analyziing remaining memory blocks ...")
         for p, (size,return_addr) in self.allocated_memories.items():
-            print( p, size,return_addr )
+            
+            #print( p, size,return_addr )
 
             if return_addr not in self.stats:
                 self.stats[return_addr] = [ 0, 0 ]
