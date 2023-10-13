@@ -25,3 +25,5 @@ malloc_replace is a sample solution to troubleshoot memory leaking / memory accu
 
 * This solution can trace malloc/free calls but cannot trace memory allocations by system calls (e.g. mmep()).
 * This solution captures backtrace of malloc/free calls, but the depth of the backtrace is limited to one.
+* `parse_malloc_trace_log.py` has to be executed on real Panorama environment, because this script uses `readelf` to read symbol tables from executable files.
+* If memory is allocated from *.so and the *.so is unloaded without free-ing the memory, caller name of the memory cannot be resolved. In order to solve this issue, you need to 
