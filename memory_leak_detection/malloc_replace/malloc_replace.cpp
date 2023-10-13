@@ -599,7 +599,9 @@ int main( int argc, const char * argv[] )
     install_signal_handler();
 
     // Start tracing malloc/free calls
-    malloc_free_trace_start("./malloc_trace.log");
+    char trace_log_filename[256];
+    snprintf( trace_log_filename, sizeof(trace_log_filename)-1, "./malloc_trace.%d.log", getpid() );
+    malloc_free_trace_start(trace_log_filename);
 
     if(false)
     {
