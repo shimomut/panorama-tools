@@ -220,22 +220,17 @@ static void flush_malloc_call_history()
 
 static inline void add_malloc_call_history( MallocOperation op, void * p, void * p2, size_t size )
 {
-    std::lock_guard<std::recursive_mutex> lock(g.mtx);
-
     if(!g.enabled)
     {
         return;
     }
 
-    if( g.malloc_call_history_size==MALLOC_CALL_HISTORY_SIZE )
-    {
-        flush_malloc_call_history();
-    }
+    MallocCallHistory new_entry;
 
-    g.malloc_call_history[g.malloc_call_history_size].op = op;
-    g.malloc_call_history[g.malloc_call_history_size].p = p;
-    g.malloc_call_history[g.malloc_call_history_size].p2 = p2;
-    g.malloc_call_history[g.malloc_call_history_size].size = size;
+    new_entry.op = op;
+    new_entry.p = p;
+    new_entry.p2 = p2;
+    new_entry.size = size;
 
     if(NUM_RETURN_ADDR_LEVELS>0)
     {
@@ -244,17 +239,26 @@ static inline void add_malloc_call_history( MallocOperation op, void * p, void *
         #if defined(USE_BUILTIN_RETURN_ADDR)
         for( size_t level=0 ; level<NUM_RETURN_ADDR_LEVELS ; ++level )
         {
-            g.malloc_call_history[g.malloc_call_history_size].return_addr[level] = __builtin_return_address(0);
+            new_entry.return_addr[level] = __builtin_return_address(0);
         }
         #else //defined(USE_BUILTIN_RETURN_ADDR)
         void * bt[NUM_RETURN_ADDR_LEVELS+1] = {0};
         backtrace( bt, sizeof(bt)/sizeof(bt[0]) );
         for( size_t level=0 ; level<NUM_RETURN_ADDR_LEVELS ; ++level )
         {
-            g.malloc_call_history[g.malloc_call_history_size].return_addr[level] = bt[level+1];
+            new_entry.return_addr[level] = bt[level+1];
         }
         #endif //defined(USE_BUILTIN_RETURN_ADDR)
     }
+
+    std::lock_guard<std::recursive_mutex> lock(g.mtx);
+
+    if( g.malloc_call_history_size==MALLOC_CALL_HISTORY_SIZE )
+    {
+        flush_malloc_call_history();
+    }
+
+    g.malloc_call_history[g.malloc_call_history_size] = new_entry;
 
     g.malloc_call_history_size ++;
 }
