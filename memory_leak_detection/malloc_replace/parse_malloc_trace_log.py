@@ -14,9 +14,16 @@ args = argparser.parse_args()
 # ---
 
 class Symbol:
+
     def __init__( self, addr_range, name ):
         self.addr_range = addr_range
         self.name = name
+
+    def __lt__(self,other):
+        return self.addr_range < other.addr_range
+
+    def __repr__(self):
+        return f"Symbol( {self.addr_range}, {self.name} )"
 
 class MemoryMap:
 
@@ -26,10 +33,17 @@ class MemoryMap:
         self.filename = filename
         self.symbols = None
 
+    def __lt__(self,other):
+        return self.addr_range < other.addr_range
+
+    def __repr__(self):
+        return f"MemoryMap( {self.addr_range}, {self.offset}, {self.filename} )"
+
 class SymbolResolver:
 
     def __init__(self):
         self.maps = []
+        self.cache = {}
 
     def load_mapfile( self, mapfile ):
 
@@ -49,31 +63,44 @@ class SymbolResolver:
                     filename = re_result.group(5)
 
                     if 'x' in mode:
-                        print( [addr_range, mode, offset, filename] )
                         self.maps.append( MemoryMap(addr_range, offset, filename) )
 
+        self.maps.sort()
+
     def resolve_symbol( self, addr ):
+
+        if addr in self.cache:
+            return self.cache[addr]
 
         for memory_map in self.maps:
 
             if memory_map.addr_range[0] <= addr < memory_map.addr_range[1]:
                 
-                addr = addr - memory_map.offset
+                addr_offset_in_module = addr - memory_map.offset
 
                 if memory_map.symbols is None:
                     memory_map.symbols = self.load_symbol_table( memory_map.filename )
 
                 for symbol in memory_map.symbols:
-                    if symbol.addr_range[0] <= addr < symbol.addr_range[1]:
+                    if symbol.addr_range[0] <= addr_offset_in_module < symbol.addr_range[1]:
+                        self.cache[addr] = symbol.name
                         return symbol.name
+                    elif addr_offset_in_module < symbol.addr_range[0]:
+                        break
 
+                self.cache[addr] = memory_map.filename
                 return memory_map.filename
+
+            elif addr < memory_map.addr_range[0]:
+                break
         
-        if 1:
+        if 0:
             print("Symbol not found :", hex(addr) )
             sys.exit(1)
 
-        return "(not-found)"
+        unknown = "(unknown)"
+        self.cache[addr] = unknown
+        return unknown
 
     def load_symbol_table( self, filename ):
 
@@ -98,6 +125,8 @@ class SymbolResolver:
                 name = re_result.group(3)
 
                 symbols.append( Symbol( (addr, addr+size), name ) )
+
+        symbols.sort()
 
         return symbols
 
