@@ -1,5 +1,8 @@
+import sys
 import argparse
 import json
+import re
+import subprocess
 
 # ---
 
@@ -10,69 +13,177 @@ args = argparser.parse_args()
 
 # ---
 
-allocated_memories = {}
+class Symbol:
+    def __init__( self, addr_range, name ):
+        self.addr_range = addr_range
+        self.name = name
 
-with open( args.logfile, "r" ) as fd:
-    for line in fd:
-        line = line.strip()
-        d = json.loads(line)
-        #print(d)
+class MemoryMap:
 
-        op = d["op"]
-        p = d["p"]
+    def __init__( self, addr_range, offset, filename ):
+        self.addr_range = addr_range
+        self.offset = offset
+        self.filename = filename
+        self.symbols = None
 
-        if op==1: # alloc
-            
-            if p in allocated_memories:
-                print("Warning : [alloc] already allocated :", p, allocated_memories[p], (d["size"], d["return_addr"]) )
-            
-            allocated_memories[p] = ( d["size"], d["return_addr"] )
+class SymbolResolver:
 
-        elif op==2: # free
+    def __init__(self):
+        self.maps = []
 
-            if p=="(nil)":
-                continue
-            
-            if p not in allocated_memories:
-                print(f"Warning : [free] freeing unknown memory {p}")
-                continue
+    def load_mapfile( self, mapfile ):
 
-            del allocated_memories[p]
+        """
+        aaaab8081000-aaaab8089000 r-xp 00000000 103:01 1304916                   /home/ubuntu/panorama-tools/memory_leak_detection/malloc_replace/malloc_replace
+        """
+
+        with open(mapfile,"r") as fd:
+            for line in fd:
+                line = line.strip()
+
+                re_result = re.match( r"([0-9a-f]+)\-([0-9a-f]+) ([a-z\-]+) ([0-9a-f]+) [0-9]+\:[0-9]+ [0-9]+[ ]+(.*)", line )
+                if re_result:
+                    addr_range = int( re_result.group(1), 16 ), int( re_result.group(2), 16 )
+                    mode = re_result.group(3)
+                    offset = int( re_result.group(4), 16 )
+                    filename = re_result.group(5)
+
+                    if 'x' in mode:
+                        print( [addr_range, mode, offset, filename] )
+                        self.maps.append( MemoryMap(addr_range, offset, filename) )
+
+    def resolve_symbol( self, addr ):
+
+        for memory_map in self.maps:
+
+            if memory_map.addr_range[0] <= addr < memory_map.addr_range[1]:
+                
+                addr = addr - memory_map.offset
+
+                if memory_map.symbols is None:
+                    memory_map.symbols = self.load_symbol_table( memory_map.filename )
+
+                for symbol in memory_map.symbols:
+                    if symbol.addr_range[0] <= addr < symbol.addr_range[1]:
+                        return symbol.name
+
+                return memory_map.filename
         
-        elif op==3: # realloc
+        if 1:
+            print("Symbol not found :", hex(addr) )
+            sys.exit(1)
 
-            p2 = d["p2"]
+        return "(not-found)"
 
-            if p not in allocated_memories:
-                print(f"Warning : [realloc] freeing unknown memory {p}")
-            else:
-                del allocated_memories[p]
+    def load_symbol_table( self, filename ):
 
-            if p2 in allocated_memories:
-                print("Warning : [realloc] already allocated :", p2, allocated_memories[p2], (d["size"], d["return_addr"]) )
+        """
+          154: 0000000000008ce0   604 FUNC    GLOBAL DEFAULT   13 mspace_independent_comall
+        """
 
-            allocated_memories[p2] = ( d["size"], d["return_addr"] )
-        
-        else:
-            assert f"Unknown operation : {op}"
+        print( "Loading symbol table :", filename )
 
-stats = {}
+        symbols = []
 
-print("---")
-print("Remaining memory blocks:")
-for p, (size,return_addr) in allocated_memories.items():
-    print( p, size,return_addr )
+        cmd = [ "readelf", "-s", filename ]
+        result = subprocess.run( cmd, capture_output=True )
 
-    return_addr_s = json.dumps(return_addr)
+        for line in result.stdout.decode("utf-8").splitlines():
+            line = line.strip()
 
-    if return_addr_s not in stats:
-        stats[return_addr_s] = [ 0, 0 ]
-    
-    stats[return_addr_s][0] += 1 # number of blocks
-    stats[return_addr_s][1] += size # total size
+            re_result = re.match( "[0-9]+\: ([0-9a-f]+)[ ]+([0-9a-f]+) [A-Z]+[ ]+[A-Z]+[ ]+[A-Z]+[ ]+[0-9A-Z]+ (.*)", line )
+            if re_result:
+                addr = int( re_result.group(1), 16 )
+                size = int( re_result.group(2), 16 )
+                name = re_result.group(3)
 
-print("---")
-print("Num remaining memory blocks and total size:")
-for caller, (num_blocks,total_size) in stats.items():
-    print( caller, ": num blocks:", num_blocks, ": total size:", total_size )
+                symbols.append( Symbol( (addr, addr+size), name ) )
 
+        return symbols
+
+
+class MallocTraceLogParser:
+
+    def __init__( self, symbol_resolver ):
+        self.symbol_resolver = symbol_resolver
+        self.allocated_memories = {}
+        self.stats = {}
+
+    def parse( self, filename ):
+
+        def resolve_return_addr_list(return_addr_list):
+            result = []
+            for return_addr in return_addr_list:
+                name = self.symbol_resolver.resolve_symbol( int(return_addr,16) )
+                result.append(name)
+            return tuple(result)
+
+        with open( filename, "r" ) as fd:
+
+            for line in fd:
+                line = line.strip()
+                d = json.loads(line)
+
+                #print(d)
+
+                op = d["op"]
+                p = d["p"]
+
+                if op==1: # alloc
+                    
+                    if p in self.allocated_memories:
+                        print("Warning : [alloc] already allocated :", p, self.allocated_memories[p], (d["size"], d["return_addr"]) )
+                    
+                    self.allocated_memories[p] = ( d["size"], resolve_return_addr_list(d["return_addr"]) )
+
+                elif op==2: # free
+
+                    if p=="(nil)":
+                        continue
+                    
+                    if p not in self.allocated_memories:
+                        print(f"Warning : [free] freeing unknown memory {p}")
+                        continue
+
+                    del self.allocated_memories[p]
+                
+                elif op==3: # realloc
+
+                    p2 = d["p2"]
+
+                    if p=="(nil)":
+                        pass
+                    elif p not in self.allocated_memories:
+                        print(f"Warning : [realloc] freeing unknown memory {p}")
+                    else:
+                        del self.allocated_memories[p]
+
+                    if p2 in self.allocated_memories:
+                        print("Warning : [realloc] already allocated :", p2, self.allocated_memories[p2], (d["size"], d["return_addr"]) )
+
+                    self.allocated_memories[p2] = ( d["size"], resolve_return_addr_list(d["return_addr"]) )
+                
+                else:
+                    assert f"Unknown operation : {op}"
+
+        print("---")
+        print("Remaining memory blocks:")
+        for p, (size,return_addr) in self.allocated_memories.items():
+            print( p, size,return_addr )
+
+            if return_addr not in self.stats:
+                self.stats[return_addr] = [ 0, 0 ]
+            
+            self.stats[return_addr][0] += 1 # number of blocks
+            self.stats[return_addr][1] += size # total size
+
+        print("---")
+        print("Num remaining memory blocks and total size:")
+        for caller, (num_blocks,total_size) in self.stats.items():
+            print( caller, ": num blocks:", num_blocks, ": total size:", total_size )
+
+symbol_resolver = SymbolResolver()
+symbol_resolver.load_mapfile( args.mapfile )
+
+parser = MallocTraceLogParser(symbol_resolver)
+parser.parse( args.logfile )
