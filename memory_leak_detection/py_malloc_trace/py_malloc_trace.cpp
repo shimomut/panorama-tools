@@ -62,22 +62,29 @@ struct Globals
 {
     Globals()
         :
-        enabled(false),
-        malloc_call_history_size(0),
-        fd(-1)
+        enabled(false)
+        #if defined(WRITE_FILE_IMMEDIATELY)
+        ,fd(-1)
+        #else //defined(WRITE_FILE_IMMEDIATELY)
+        ,malloc_call_history_size(0)
+        #endif //defined(WRITE_FILE_IMMEDIATELY)
     {
+        #if !defined(WRITE_FILE_IMMEDIATELY)
         memset( malloc_call_history, 0, sizeof(malloc_call_history) );
+        #endif //defined(WRITE_FILE_IMMEDIATELY)
     }
 
-    std::recursive_mutex mtx;
-
     bool enabled;
+    std::string output_filename;
 
+    #if defined(WRITE_FILE_IMMEDIATELY)
+    int fd;
+    #else //defined(WRITE_FILE_IMMEDIATELY)
+    std::recursive_mutex mtx;
     MallocCallHistory malloc_call_history[MALLOC_CALL_HISTORY_SIZE];
     size_t malloc_call_history_size;
+    #endif //defined(WRITE_FILE_IMMEDIATELY)
 
-    std::string output_filename;
-    int fd;
 };
 
 static Globals g;
@@ -120,6 +127,49 @@ static inline int format_malloc_call_history( char * buf, int bufsize, const Mal
 
     return (p - buf);
 }
+
+#if defined(WRITE_FILE_IMMEDIATELY)
+
+static inline void write_malloc_call_history( MallocOperation op, void * p, void * p2, size_t size )
+{
+    if(!g.enabled)
+    {
+        return;
+    }
+
+    MallocCallHistory new_entry;
+
+    new_entry.op = op;
+    new_entry.p = p;
+    new_entry.p2 = p2;
+    new_entry.size = size;
+
+    if(NUM_RETURN_ADDR_LEVELS>0)
+    {
+        #if defined(USE_BUILTIN_RETURN_ADDR)
+        for( size_t level=0 ; level<NUM_RETURN_ADDR_LEVELS ; ++level )
+        {
+            new_entry.return_addr[level] = __builtin_return_address(0);
+        }
+        #else //defined(USE_BUILTIN_RETURN_ADDR)
+        void * bt[NUM_RETURN_ADDR_LEVELS+1] = {0};
+        backtrace( bt, sizeof(bt)/sizeof(bt[0]) );
+        for( size_t level=0 ; level<NUM_RETURN_ADDR_LEVELS ; ++level )
+        {
+            new_entry.return_addr[level] = bt[level+1];
+        }
+        #endif //defined(USE_BUILTIN_RETURN_ADDR)
+    }
+
+    {
+        char buf[1024];
+        int len = format_malloc_call_history( buf, sizeof(buf), new_entry );
+        ssize_t result = write( g.fd, buf, len );
+        (void)result;
+    }
+}
+
+#else //defined(WRITE_FILE_IMMEDIATELY)
 
 static void flush_malloc_call_history()
 {
@@ -186,44 +236,7 @@ static inline void add_malloc_call_history( MallocOperation op, void * p, void *
     g.malloc_call_history_size ++;
 }
 
-static inline void write_malloc_call_history( MallocOperation op, void * p, void * p2, size_t size )
-{
-    if(!g.enabled)
-    {
-        return;
-    }
-
-    MallocCallHistory new_entry;
-
-    new_entry.op = op;
-    new_entry.p = p;
-    new_entry.p2 = p2;
-    new_entry.size = size;
-
-    if(NUM_RETURN_ADDR_LEVELS>0)
-    {
-        #if defined(USE_BUILTIN_RETURN_ADDR)
-        for( size_t level=0 ; level<NUM_RETURN_ADDR_LEVELS ; ++level )
-        {
-            new_entry.return_addr[level] = __builtin_return_address(0);
-        }
-        #else //defined(USE_BUILTIN_RETURN_ADDR)
-        void * bt[NUM_RETURN_ADDR_LEVELS+1] = {0};
-        backtrace( bt, sizeof(bt)/sizeof(bt[0]) );
-        for( size_t level=0 ; level<NUM_RETURN_ADDR_LEVELS ; ++level )
-        {
-            new_entry.return_addr[level] = bt[level+1];
-        }
-        #endif //defined(USE_BUILTIN_RETURN_ADDR)
-    }
-
-    {
-        char buf[1024];
-        int len = format_malloc_call_history( buf, sizeof(buf), new_entry );
-        ssize_t result = write( g.fd, buf, len );
-        (void)result;
-    }
-}
+#endif //defined(WRITE_FILE_IMMEDIATELY)
 
 #if defined(USE_MALLOC_HISTORY)
 #if defined(WRITE_FILE_IMMEDIATELY)
