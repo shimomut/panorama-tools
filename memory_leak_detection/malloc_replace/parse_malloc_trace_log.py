@@ -1,3 +1,4 @@
+import os
 import sys
 import argparse
 import json
@@ -45,6 +46,7 @@ class SymbolResolver:
     def __init__(self):
         self.maps = []
         self.cache = {}
+        self.unresolved = []
 
     def load_mapfile( self, mapfile ):
 
@@ -56,7 +58,7 @@ class SymbolResolver:
             for line in fd:
                 line = line.strip()
 
-                re_result = re.match( r"([0-9a-f]+)\-([0-9a-f]+) ([a-z\-]+) ([0-9a-f]+) [0-9]+\:[0-9]+ [0-9]+[ ]+(.*)", line )
+                re_result = re.match( r"([0-9a-f]+)\-([0-9a-f]+) ([a-z\-]+) ([0-9a-f]+) [0-9a-f]+\:[0-9a-f]+ [0-9]+[ ]+(.*)", line )
                 if re_result:
                     addr_range = int( re_result.group(1), 16 ), int( re_result.group(2), 16 )
                     mode = re_result.group(3)
@@ -102,9 +104,8 @@ class SymbolResolver:
             elif addr < memory_map.addr_range[0]:
                 break
         
-        if 0:
-            print("Symbol not found :", hex(addr) )
-            sys.exit(1)
+        if len(self.unresolved) < 10:
+            self.unresolved.append(addr)
 
         name = "(unknown)" + "::" + "(unknown)"
         self.cache[addr] = name
@@ -116,11 +117,17 @@ class SymbolResolver:
           154: 0000000000008ce0   604 FUNC    GLOBAL DEFAULT   13 mspace_independent_comall
         """
 
-        print( "Loading symbol table :", filename )
+        local_symbol_filename = os.path.join( "./symbols", filename.lstrip("/") )
+        if os.path.exists(local_symbol_filename):
+            symbol_filename = local_symbol_filename
+        else:
+            symbol_filename = filename
+
+        print( "Loading symbol table :", symbol_filename )
 
         symbols = []
 
-        cmd = [ "readelf", "-s", filename ]
+        cmd = [ "readelf", "-s", symbol_filename ]
         result = subprocess.run( cmd, capture_output=True )
 
         for line in result.stdout.decode("utf-8").splitlines():
@@ -137,6 +144,13 @@ class SymbolResolver:
         symbols.sort()
 
         return symbols
+
+    def print_unresolved(self):
+
+        print("---")
+        print("Unresolved addresses:")
+        for addr in sorted(self.unresolved):
+            print( hex(addr) )
 
 
 class MallocTraceLogParser:
@@ -237,3 +251,5 @@ symbol_resolver.load_mapfile( args.mapfile )
 
 parser = MallocTraceLogParser(symbol_resolver)
 parser.parse( args.logfile )
+
+symbol_resolver.print_unresolved()
