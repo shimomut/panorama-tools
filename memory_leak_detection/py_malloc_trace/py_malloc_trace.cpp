@@ -15,12 +15,16 @@
 #define USE_MALLOC_HISTORY
 #define USE_BUILTIN_RETURN_ADDR // backtrace() sometimes doesn't return. Use __builtin_return_address instead.
 
+#define TRACE_LOG_DIRNAME "/tmp/"
+//#define TRACE_LOG_DIRNAME "./"
+
 static const size_t MALLOC_CALL_HISTORY_SIZE = 100000;
 static const size_t NUM_RETURN_ADDR_LEVELS = 1; // This configuration has big impact on the performance.
 
 //-----
 
-static void my_printf( const char * fmt, ... )
+// printf like function which doesn't use malloc
+static void malloc_trace_printf( const char * fmt, ... )
 {
     char buf[1024];
 
@@ -205,7 +209,7 @@ extern "C" void __libc_free(void*);
 
 extern "C" void * malloc( size_t size )
 {
-    //my_printf( "malloc called: size=%d\n", size );
+    //malloc_trace_printf( "malloc called: size=%d\n", size );
 
     void * p = __libc_malloc(size);
 
@@ -216,7 +220,7 @@ extern "C" void * malloc( size_t size )
 
 extern "C" void * memalign( size_t align, size_t size )
 {
-    //my_printf( "memalign called: align=%d, size=%d\n", align, size );
+    //malloc_trace_printf( "memalign called: align=%d, size=%d\n", align, size );
 
     void * p = __libc_memalign( align, size );
 
@@ -227,7 +231,7 @@ extern "C" void * memalign( size_t align, size_t size )
 
 extern "C" void * calloc( size_t n, size_t size )
 {
-    //my_printf( "calloc called: n=%d, size=%d\n", n, size );
+    //malloc_trace_printf( "calloc called: n=%d, size=%d\n", n, size );
 
     void * p = __libc_calloc( n, size );
 
@@ -238,7 +242,7 @@ extern "C" void * calloc( size_t n, size_t size )
 
 extern "C" void * realloc( void * old_p, size_t size )
 {
-    //my_printf( "realloc called: old_p=%p, size=%d\n", old_p, size );
+    //malloc_trace_printf( "realloc called: old_p=%p, size=%d\n", old_p, size );
 
     void * new_p = __libc_realloc( old_p, size );
 
@@ -254,7 +258,7 @@ static inline bool is_power_of_2( size_t x )
 
 extern "C" int posix_memalign( void **memptr, size_t align, size_t size )
 {
-    //my_printf( "posix_memalign called: align=%d, size=%d\n", align, size );
+    //malloc_trace_printf( "posix_memalign called: align=%d, size=%d\n", align, size );
 
     if( align % sizeof(void*) != 0
         || !is_power_of_2(align / sizeof(void*))
@@ -282,7 +286,7 @@ extern "C" int posix_memalign( void **memptr, size_t align, size_t size )
 
 extern "C" void free( void * p )
 {
-    //my_printf( "free called: p=%p\n", p );
+    //malloc_trace_printf( "free called: p=%p\n", p );
 
     ADD_MALLOC_CALL_HISTORY( MallocOperation_Free, p, NULL, 0 );
 
@@ -291,7 +295,7 @@ extern "C" void free( void * p )
 
 extern "C" void * aligned_alloc( size_t align, size_t size )
 {
-    //my_printf( "aligned_alloc called: align=%d, size=%d\n", align, size );
+    //malloc_trace_printf( "aligned_alloc called: align=%d, size=%d\n", align, size );
 
     void * p = __libc_memalign( align, size );
 
@@ -302,7 +306,7 @@ extern "C" void * aligned_alloc( size_t align, size_t size )
 
 extern "C" void * valloc( size_t size )
 {
-    my_printf( "valloc called: size=%d\n", size );
+    malloc_trace_printf( "valloc called: size=%d\n", size );
 
     abort();
 
@@ -311,7 +315,7 @@ extern "C" void * valloc( size_t size )
 
 extern "C" void * pvalloc( size_t size )
 {
-    my_printf( "pvalloc called: size=%d\n", size );
+    malloc_trace_printf( "pvalloc called: size=%d\n", size );
 
     abort();
 
@@ -320,7 +324,7 @@ extern "C" void * pvalloc( size_t size )
 
 extern "C" size_t malloc_usable_size(void *ptr)
 {
-    my_printf( "malloc_usable_size called: p=%p\n", ptr );
+    malloc_trace_printf( "malloc_usable_size called: p=%p\n", ptr );
 
     abort();
 
@@ -390,7 +394,7 @@ int main( int argc, const char * argv[] )
 
     // Start tracing malloc/free calls
     char trace_log_filename[256];
-    snprintf( trace_log_filename, sizeof(trace_log_filename)-1, "./malloc_trace.%d.log", getpid() );
+    snprintf( trace_log_filename, sizeof(trace_log_filename)-1, TRACE_LOG_DIRNAME "malloc_trace.%d.log", getpid() );
     malloc_free_trace_start(trace_log_filename);
 
     if(false)
