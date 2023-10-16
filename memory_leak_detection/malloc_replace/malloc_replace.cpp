@@ -20,12 +20,10 @@
 
 #define REPLACE_MALLOC_FREE
 #define USE_MALLOC_HISTORY
-//#define USE_CHECK_POINT_HISTORY
 #define USE_BUILTIN_RETURN_ADDR // backtrace() sometimes doesn't return. Use __builtin_return_address instead.
 
 static const size_t MALLOC_CALL_HISTORY_SIZE = 100000;
 static const size_t NUM_RETURN_ADDR_LEVELS = 1; // This configuration has big impact on the performance.
-static const size_t NUM_CHECK_POINT_HISTORY = 50;
 
 //-----
 
@@ -43,71 +41,6 @@ static void my_printf( const char * fmt, ... )
     ssize_t result = write( STDOUT_FILENO, buf, len );
     (void)result;
 }
-
-//-----
-
-struct CheckPoint
-{
-    CheckPoint( const char * _filename=NULL, const char * _funcname=NULL, int _lineno=0, pthread_t _thread_id=0 )
-        :
-        filename(_filename),
-        funcname(_funcname),
-        lineno(_lineno),
-        thread_id(_thread_id)
-    {
-    }
-
-    const char * filename;
-    const char * funcname;
-    int lineno;
-    pthread_t thread_id;
-};
-
-struct CheckPointHistory
-{
-    CheckPointHistory()
-        :
-        next_index(0)
-    {
-    }
-
-    void Check( const char * _filename, const char * _funcname, int _lineno )
-    {
-        std::lock_guard<std::recursive_mutex> lock(mtx);
-
-        check_points[next_index] = CheckPoint( _filename, _funcname, _lineno, pthread_self() );
-        next_index = (next_index+1) % NUM_CHECK_POINT_HISTORY;
-    }
-
-    void Print()
-    {
-        my_printf("Check points:\n");
-
-        std::lock_guard<std::recursive_mutex> lock(mtx);
-
-        for( size_t i=0 ; i<NUM_CHECK_POINT_HISTORY ; ++i )
-        {
-            int index = (next_index+i) % NUM_CHECK_POINT_HISTORY;
-            if( check_points[index].filename )
-            {
-                my_printf("%s - %s - %d - %p\n", check_points[index].filename, check_points[index].funcname, check_points[index].lineno, check_points[index].thread_id );
-            }
-        }
-    }
-
-    std::recursive_mutex mtx;
-
-    CheckPoint check_points[NUM_CHECK_POINT_HISTORY];
-    int next_index;
-};
-
-static CheckPointHistory check_point_history;
-
-#if defined(USE_CHECK_POINT_HISTORY)
-#define CHECK_POINT() check_point_history.Check(__FILE__,__func__,__LINE__)
-#else //defined(USE_CHECK_POINT_HISTORY)
-#define CHECK_POINT() ((void)0)
-#endif //defined(USE_CHECK_POINT_HISTORY)
 
 //-----
 
@@ -153,20 +86,14 @@ static Globals g;
 
 static void flush_malloc_call_history()
 {
-    CHECK_POINT();
-    
     std::lock_guard<std::recursive_mutex> lock(g.mtx);
 
     if( g.malloc_call_history_size > 0 )
     {
-        CHECK_POINT();
-    
         int fd = open( g.output_filename.c_str(), O_CREAT | O_WRONLY | O_APPEND, 0644 );
 
         for( size_t i=0 ; i<g.malloc_call_history_size ; ++i )
         {
-            CHECK_POINT();
-
             char buf[1024];
             int len;
 
@@ -183,8 +110,6 @@ static void flush_malloc_call_history()
 
             for( size_t level=0 ; level<NUM_RETURN_ADDR_LEVELS ; ++level )
             {
-                CHECK_POINT();
-                
                 const char * format;
                 if( level<NUM_RETURN_ADDR_LEVELS-1 )
                 {
@@ -208,14 +133,10 @@ static void flush_malloc_call_history()
             }
         }
 
-        CHECK_POINT();
-
         close(fd);
 
         g.malloc_call_history_size = 0;
     }
-
-    CHECK_POINT();
 }
 
 static inline void add_malloc_call_history( MallocOperation op, void * p, void * p2, size_t size )
@@ -234,8 +155,6 @@ static inline void add_malloc_call_history( MallocOperation op, void * p, void *
 
     if(NUM_RETURN_ADDR_LEVELS>0)
     {
-        CHECK_POINT();
-
         #if defined(USE_BUILTIN_RETURN_ADDR)
         for( size_t level=0 ; level<NUM_RETURN_ADDR_LEVELS ; ++level )
         {
@@ -293,60 +212,44 @@ extern "C" void __libc_free(void*);
 
 extern "C" void * malloc( size_t size )
 {
-    CHECK_POINT();
-
     //my_printf( "malloc called: size=%d\n", size );
 
     void * p = __libc_malloc(size);
 
     ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, NULL, size );
 
-    CHECK_POINT();
-
     return p;
 }
 
 extern "C" void * memalign( size_t align, size_t size )
 {
-    CHECK_POINT();
-
     //my_printf( "memalign called: align=%d, size=%d\n", align, size );
 
     void * p = __libc_memalign( align, size );
 
     ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, NULL, size );
 
-    CHECK_POINT();
-
     return p;
 }
 
 extern "C" void * calloc( size_t n, size_t size )
 {
-    CHECK_POINT();
-
     //my_printf( "calloc called: n=%d, size=%d\n", n, size );
 
     void * p = __libc_calloc( n, size );
 
     ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, NULL, size );
 
-    CHECK_POINT();
-
     return p;
 }
 
 extern "C" void * realloc( void * old_p, size_t size )
 {
-    CHECK_POINT();
-
     //my_printf( "realloc called: old_p=%p, size=%d\n", old_p, size );
 
     void * new_p = __libc_realloc( old_p, size );
 
     ADD_MALLOC_CALL_HISTORY( MallocOperation_Realloc, old_p, new_p, size );
-
-    CHECK_POINT();
 
     return new_p;
 }
@@ -358,8 +261,6 @@ static inline bool is_power_of_2( size_t x )
 
 extern "C" int posix_memalign( void **memptr, size_t align, size_t size )
 {
-    CHECK_POINT();
-
     //my_printf( "posix_memalign called: align=%d, size=%d\n", align, size );
 
     if( align % sizeof(void*) != 0
@@ -383,43 +284,31 @@ extern "C" int posix_memalign( void **memptr, size_t align, size_t size )
 
     ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, *memptr, NULL, size );
 
-    CHECK_POINT();
-
     return result;
 }
 
 extern "C" void free( void * p )
 {
-    CHECK_POINT();
-
     //my_printf( "free called: p=%p\n", p );
 
     ADD_MALLOC_CALL_HISTORY( MallocOperation_Free, p, NULL, 0 );
 
     __libc_free(p);
-
-    CHECK_POINT();
 }
 
 extern "C" void * aligned_alloc( size_t align, size_t size )
 {
-    CHECK_POINT();
-
     //my_printf( "aligned_alloc called: align=%d, size=%d\n", align, size );
 
     void * p = __libc_memalign( align, size );
 
     ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, NULL, size );
 
-    CHECK_POINT();
-
     return p;
 }
 
 extern "C" void * valloc( size_t size )
 {
-    CHECK_POINT();
-
     my_printf( "valloc called: size=%d\n", size );
 
     abort();
@@ -429,8 +318,6 @@ extern "C" void * valloc( size_t size )
 
 extern "C" void * pvalloc( size_t size )
 {
-    CHECK_POINT();
-
     my_printf( "pvalloc called: size=%d\n", size );
 
     abort();
@@ -440,8 +327,6 @@ extern "C" void * pvalloc( size_t size )
 
 extern "C" size_t malloc_usable_size(void *ptr)
 {
-    CHECK_POINT();
-
     my_printf( "malloc_usable_size called: p=%p\n", ptr );
 
     abort();
@@ -455,10 +340,6 @@ extern "C" size_t malloc_usable_size(void *ptr)
 
 static void _signal_handler(int sig)
 {
-    #if defined(USE_CHECK_POINT_HISTORY)
-    check_point_history.Print();
-    #endif //defined(USE_CHECK_POINT_HISTORY)
-
     // Be careful to use only signal-safe functions
     // https://man7.org/linux/man-pages/man7/signal-safety.7.html
 
@@ -602,10 +483,6 @@ int main( int argc, const char * argv[] )
 
     // Stop tracing malloc/free calls, and flush the history
     malloc_free_trace_stop();
-
-    #if defined(USE_CHECK_POINT_HISTORY)
-    check_point_history.Print();
-    #endif //defined(USE_CHECK_POINT_HISTORY)
 
     return result;
 }
