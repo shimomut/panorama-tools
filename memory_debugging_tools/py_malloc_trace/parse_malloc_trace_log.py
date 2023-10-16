@@ -151,6 +151,11 @@ class SymbolResolver:
 
         return symbols
 
+    def load_symbol_table_all(self):
+        for memory_map in self.maps:
+            if memory_map.symbols is None:
+                memory_map.symbols = self.load_symbol_table( memory_map.filename )
+    
     def print_unresolved(self):
 
         print("---")
@@ -175,9 +180,15 @@ class MallocTraceLogParser:
                 result.append(name)
             return tuple(result)
 
+        print( "Parsing trace log :", filename )
+        
         with open( filename, "r" ) as fd:
 
-            for line in fd:
+            for lineno, line in enumerate(fd):
+
+                if lineno % 100000==0:
+                    print(".", end="", flush=True)
+                
                 line = line.strip()
                 try:
                     d = json.loads(line)
@@ -254,6 +265,7 @@ class MallocTraceLogParser:
 
 symbol_resolver = SymbolResolver()
 symbol_resolver.load_mapfile( args.mapfile )
+symbol_resolver.load_symbol_table_all()
 
 parser = MallocTraceLogParser(symbol_resolver)
 parser.parse( args.logfile )
