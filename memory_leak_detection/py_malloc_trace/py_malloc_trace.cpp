@@ -13,11 +13,11 @@
 
 #define REPLACE_MALLOC_FREE
 #define USE_MALLOC_HISTORY
-#define WRITE_FILE_IMMEDIATELY
+#define WRITE_FILE_IMMEDIATELY // faster in multi-threaded programs because it doesn't require mutex lock.
 #define USE_BUILTIN_RETURN_ADDR // backtrace() sometimes doesn't return. Use __builtin_return_address instead.
 
-//#define TRACE_LOG_DIRNAME "/tmp/"
-#define TRACE_LOG_DIRNAME "./"
+#define TRACE_LOG_DIRNAME "/tmp/"
+//#define TRACE_LOG_DIRNAME "./"
 
 static const size_t MALLOC_CALL_HISTORY_SIZE = 100000;
 static const size_t NUM_RETURN_ADDR_LEVELS = 1; // This configuration has big impact on the performance.
@@ -398,6 +398,8 @@ extern "C" size_t malloc_usable_size(void *ptr)
 
 void test_malloc_free()
 {
+    malloc_trace_printf("test_malloc_free starting\n");
+
     for( int i=0 ; i<10000 ; ++i )
     {
         {
@@ -447,6 +449,24 @@ void test_malloc_free()
             free(p);
         }
     }
+
+    malloc_trace_printf("test_malloc_free ended\n");
+}
+
+void test_malloc_free_multi_threads()
+{
+    const int num_threads = 10;
+    std::thread t[num_threads];
+
+    for( int i=0 ; i<num_threads ; ++i )
+    {
+        t[i] = std::thread(test_malloc_free);
+    }
+
+    for( int i=0 ; i<num_threads ; ++i )
+    {
+        t[i].join();
+    }
 }
 
 int main( int argc, const char * argv[] )
@@ -454,13 +474,21 @@ int main( int argc, const char * argv[] )
     int result = 0;
 
     // Start tracing malloc/free calls
-    char trace_log_filename[256];
-    snprintf( trace_log_filename, sizeof(trace_log_filename)-1, TRACE_LOG_DIRNAME "malloc_trace.%d.log", getpid() );
-    malloc_free_trace_start(trace_log_filename);
+    {
+        char trace_log_filename[256];
+        snprintf( trace_log_filename, sizeof(trace_log_filename)-1, TRACE_LOG_DIRNAME "malloc_trace.%d.log", getpid() );
+        malloc_trace_printf( "Starting malloc tracing : %s\n", trace_log_filename );
+        malloc_free_trace_start(trace_log_filename);
+    }
 
     if(false)
     {
         test_malloc_free();
+    }
+
+    if(false)
+    {
+        test_malloc_free_multi_threads();
     }
 
     // Run python
@@ -485,7 +513,9 @@ int main( int argc, const char * argv[] )
     }
 
     // Stop tracing malloc/free calls, and flush the history
-    malloc_free_trace_stop();
+    {
+        malloc_free_trace_stop();
+    }
 
     return result;
 }
