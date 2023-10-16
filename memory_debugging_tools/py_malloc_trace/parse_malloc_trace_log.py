@@ -25,7 +25,7 @@ class Symbol:
         return self.addr_range < other.addr_range
 
     def __repr__(self):
-        return f"Symbol( {self.addr_range}, {self.name} )"
+        return f"Symbol( [{hex(self.addr_range[0])}, {hex(self.addr_range[1])}], {self.name} )"
 
 class MemoryMap:
 
@@ -39,7 +39,7 @@ class MemoryMap:
         return self.addr_range < other.addr_range
 
     def __repr__(self):
-        return f"MemoryMap( {self.addr_range}, {self.offset}, {self.filename} )"
+        return f"MemoryMap( [{hex(self.addr_range[0])}, {hex(self.addr_range[1])}], {self.offset}, {self.filename} )"
 
 class SymbolResolver:
 
@@ -53,6 +53,8 @@ class SymbolResolver:
         """
         aaaab8081000-aaaab8089000 r-xp 00000000 103:01 1304916                   /home/ubuntu/panorama-tools/memory_leak_detection/py_malloc_trace/py_malloc_trace
         """
+
+        print( "Loading memory map info :", mapfile )
 
         with open(mapfile,"r") as fd:
             for line in fd:
@@ -74,6 +76,8 @@ class SymbolResolver:
                         self.maps.append( MemoryMap(addr_range, offset, filename) )
 
         self.maps.sort()
+
+        pprint.pprint(self.maps)
 
     def resolve_symbol( self, addr ):
 
@@ -142,6 +146,8 @@ class SymbolResolver:
                 symbols.append( Symbol( (addr, addr+size), name ) )
 
         symbols.sort()
+
+        print( f"Found {len(symbols)} symbols" )
 
         return symbols
 
