@@ -1,14 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <malloc.h>
-#include <dlfcn.h>
-#include <unistd.h>
 #include <fcntl.h>
-#include <signal.h>
-#include <execinfo.h>
-#include <gnu/lib-names.h>
-#include <pthread.h>
 
 #include <cstdlib>
 #include <thread>
@@ -338,58 +331,6 @@ extern "C" size_t malloc_usable_size(void *ptr)
 
 // ---
 
-static void _signal_handler(int sig)
-{
-    // Be careful to use only signal-safe functions
-    // https://man7.org/linux/man-pages/man7/signal-safety.7.html
-
-    // get backtrace in the array
-    void *array[30];
-    size_t size;
-    size = backtrace( array, sizeof(array)/sizeof(array[0]) );
-
-    // print heading error message line
-    const char msg[] = "Error: caught signal - ";
-    size_t result = write( STDERR_FILENO, msg, sizeof(msg)-1 );
-    (void)result;
-
-    const char * signal_name = strsignal(sig);
-    result = write( STDERR_FILENO, signal_name, strlen(signal_name) );
-    (void)result;
-
-    const char msg2[] = ":\n";
-    result = write( STDERR_FILENO, msg2, sizeof(msg2)-1 );
-    (void)result;
-
-    // print backtrace to stderr
-    backtrace_symbols_fd(array, size, STDERR_FILENO);
-
-    // exit the process with signal-safe version of exit function
-    //_exit(1);
-}
-
-void install_signal_handler()
-{
-    int signalnums[] = {
-        SIGABRT,
-        SIGBUS,
-        SIGFPE,
-        SIGHUP,
-        SIGILL,
-        SIGINT,
-        SIGKILL,
-        SIGSEGV,
-        SIGTERM
-    };
-
-    for( size_t i=0 ; i<sizeof(signalnums)/sizeof(signalnums[0]) ; ++i  )
-    {
-        signal( signalnums[i], _signal_handler);
-    }
-}
-
-// ---
-
 void test_malloc_free()
 {
     for( int i=0 ; i<10000 ; ++i )
@@ -446,9 +387,6 @@ void test_malloc_free()
 int main( int argc, const char * argv[] )
 {
     int result = 0;
-
-    // Install signal handler for troubleshooting
-    install_signal_handler();
 
     // Start tracing malloc/free calls
     char trace_log_filename[256];
