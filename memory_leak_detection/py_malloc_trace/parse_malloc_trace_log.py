@@ -51,7 +51,7 @@ class SymbolResolver:
     def load_mapfile( self, mapfile ):
 
         """
-        aaaab8081000-aaaab8089000 r-xp 00000000 103:01 1304916                   /home/ubuntu/panorama-tools/memory_leak_detection/malloc_replace/malloc_replace
+        aaaab8081000-aaaab8089000 r-xp 00000000 103:01 1304916                   /home/ubuntu/panorama-tools/memory_leak_detection/py_malloc_trace/py_malloc_trace
         """
 
         with open(mapfile,"r") as fd:
