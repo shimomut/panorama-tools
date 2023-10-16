@@ -1,7 +1,7 @@
 sm_yolov5/work-*
 mlops_nvds/data
-memory_leak_detection/py_malloc_trace/build
-memory_leak_detection/py_malloc_trace/results
-memory_leak_detection/py_malloc_trace/py_malloc_trace
-memory_leak_detection/py_malloc_trace/*.log
-memory_leak_detection/py_malloc_trace/memory_map.txt
+memory_debugging_tools/py_malloc_trace/build
+memory_debugging_tools/py_malloc_trace/results
+memory_debugging_tools/py_malloc_trace/py_malloc_trace
+memory_debugging_tools/py_malloc_trace/*.log
+memory_debugging_tools/py_malloc_trace/memory_map.txt
