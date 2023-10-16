@@ -11,7 +11,7 @@
 
 //-----
 
-#define REPLACE_MALLOC_FREE
+#define REPLACE_MALLOC_FUNCTIONS
 #define USE_MALLOC_HISTORY
 #define WRITE_FILE_IMMEDIATELY // faster in multi-threaded programs because it doesn't require mutex lock.
 #define USE_BUILTIN_RETURN_ADDR // backtrace() sometimes doesn't return. Use __builtin_return_address instead.
@@ -235,7 +235,7 @@ static inline void write_malloc_call_history( MallocOperation op, void * p, void
 #define ADD_MALLOC_CALL_HISTORY(op,p,p2,size) (void)0
 #endif //defined(USE_MALLOC_HISTORY)
 
-static void malloc_free_trace_start( const char * output_filename )
+static void malloc_trace_start( const char * output_filename )
 {
     g.output_filename = output_filename;
 
@@ -246,7 +246,7 @@ static void malloc_free_trace_start( const char * output_filename )
     g.enabled = true;
 }
 
-static void malloc_free_trace_stop()
+static void malloc_trace_stop()
 {
     g.enabled = false;
 
@@ -260,7 +260,7 @@ static void malloc_free_trace_stop()
 
 // ---
 
-#if defined(REPLACE_MALLOC_FREE)
+#if defined(REPLACE_MALLOC_FUNCTIONS)
 
 extern "C" void* __libc_malloc(size_t);
 extern "C" void* __libc_memalign(size_t, size_t);
@@ -392,13 +392,13 @@ extern "C" size_t malloc_usable_size(void *ptr)
     return 0;
 }
 
-#endif //defined(REPLACE_MALLOC_FREE)
+#endif //defined(REPLACE_MALLOC_FUNCTIONS)
 
 // ---
 
-void test_malloc_free()
+void test_malloc_functions()
 {
-    malloc_trace_printf("test_malloc_free starting\n");
+    malloc_trace_printf("test_malloc_functions starting\n");
 
     for( int i=0 ; i<10000 ; ++i )
     {
@@ -450,17 +450,17 @@ void test_malloc_free()
         }
     }
 
-    malloc_trace_printf("test_malloc_free ended\n");
+    malloc_trace_printf("test_malloc_functions ended\n");
 }
 
-void test_malloc_free_multi_threads()
+void test_malloc_functions_multi_threads()
 {
     const int num_threads = 10;
     std::thread t[num_threads];
 
     for( int i=0 ; i<num_threads ; ++i )
     {
-        t[i] = std::thread(test_malloc_free);
+        t[i] = std::thread(test_malloc_functions);
     }
 
     for( int i=0 ; i<num_threads ; ++i )
@@ -478,17 +478,17 @@ int main( int argc, const char * argv[] )
         char trace_log_filename[256];
         snprintf( trace_log_filename, sizeof(trace_log_filename)-1, TRACE_LOG_DIRNAME "malloc_trace.%d.log", getpid() );
         malloc_trace_printf( "Starting malloc tracing : %s\n", trace_log_filename );
-        malloc_free_trace_start(trace_log_filename);
+        malloc_trace_start(trace_log_filename);
     }
 
     if(false)
     {
-        test_malloc_free();
+        test_malloc_functions();
     }
 
     if(false)
     {
-        test_malloc_free_multi_threads();
+        test_malloc_functions_multi_threads();
     }
 
     // Run python
@@ -514,7 +514,7 @@ int main( int argc, const char * argv[] )
 
     // Stop tracing malloc/free calls, and flush the history
     {
-        malloc_free_trace_stop();
+        malloc_trace_stop();
     }
 
     return result;
