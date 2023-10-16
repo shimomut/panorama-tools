@@ -9,6 +9,9 @@ class PyObjsStatsThread(threading.Thread):
 
     interval = 60  # in seconds
 
+    output_dirname = "/tmp"
+    #output_dirname = "."
+
     @staticmethod
     def instance():
         if not PyObjsStatsThread._instance:
@@ -50,6 +53,9 @@ class PyObjsStatsThread(threading.Thread):
                 stat[type_s] = 0
             stat[type_s] += 1
         
-        with open( f"/tmp/py_objs_stats.{self.pid}.{self.stats_number}.txt", "w" ) as fd:
+        filename = os.path.join( self.output_dirname, f"py_objs_stats.{self.pid}.{self.stats_number}.txt" )
+        #print("Writing",filename)
+
+        with open( filename, "w" ) as fd:
             for k in sorted(stat.keys()):
                 fd.write( f"{k} : {stat[k]}\n" )

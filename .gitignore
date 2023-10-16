@@ -1,3 +1,4 @@
+__pycache__
 sm_yolov5/work-*
 mlops_nvds/data
 memory_debugging_tools/py_malloc_trace/build
