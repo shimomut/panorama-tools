@@ -43,15 +43,13 @@ static void malloc_trace_printf( const char * fmt, ... )
 enum MallocOperation
 {
     MallocOperation_Alloc = 1,
-    MallocOperation_Free = 2,
-    MallocOperation_Realloc = 3
+    MallocOperation_Free = 2
 };
 
 struct MallocCallHistory
 {
     MallocOperation op;
     void * p;
-    void * p2;
     size_t size;
     void * return_addr[NUM_RETURN_ADDR_LEVELS];
 };
@@ -80,10 +78,9 @@ static inline int format_malloc_call_history( char * buf, int bufsize, const Mal
     bufsize -= 1;
     int len;
 
-    len = snprintf( p, bufsize, "{\"op\":%d,\"p\":\"%p\",\"p2\":\"%p\",\"size\":%zd,\"return_addr\":[", 
+    len = snprintf( p, bufsize, "{\"op\":%d,\"p\":\"%p\",\"size\":%zd,\"return_addr\":[", 
         entry.op,
         entry.p,
-        entry.p2,
         entry.size );
     p += len;
     bufsize -= len;
@@ -111,7 +108,7 @@ static inline int format_malloc_call_history( char * buf, int bufsize, const Mal
     return (p - buf);
 }
 
-static inline void write_malloc_call_history( MallocOperation op, void * p, void * p2, size_t size, void * return_addr )
+static inline void write_malloc_call_history( MallocOperation op, void * p, size_t size, void * return_addr )
 {
     if(!g.enabled)
     {
@@ -122,7 +119,6 @@ static inline void write_malloc_call_history( MallocOperation op, void * p, void
 
     new_entry.op = op;
     new_entry.p = p;
-    new_entry.p2 = p2;
     new_entry.size = size;
 
     #if defined(USE_BUILTIN_RETURN_ADDR)
@@ -148,9 +144,9 @@ static inline void write_malloc_call_history( MallocOperation op, void * p, void
 }
 
 #if defined(USE_MALLOC_HISTORY)
-#define ADD_MALLOC_CALL_HISTORY(op,p,p2,size) write_malloc_call_history(op,p,p2,size,__builtin_return_address(0))
+#define ADD_MALLOC_CALL_HISTORY(op,p,size) write_malloc_call_history(op,p,size,__builtin_return_address(0))
 #else //defined(USE_MALLOC_HISTORY)
-#define ADD_MALLOC_CALL_HISTORY(op,p,p2,size) (void)0
+#define ADD_MALLOC_CALL_HISTORY(op,p,size) (void)0
 #endif //defined(USE_MALLOC_HISTORY)
 
 static void malloc_trace_start( const char * output_filename )
@@ -185,7 +181,7 @@ extern "C" void * malloc( size_t size )
 
     void * p = __libc_malloc(size);
 
-    ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, NULL, size );
+    ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, size );
 
     return p;
 }
@@ -196,7 +192,7 @@ extern "C" void * memalign( size_t align, size_t size )
 
     void * p = __libc_memalign( align, size );
 
-    ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, NULL, size );
+    ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, size );
 
     return p;
 }
@@ -207,7 +203,7 @@ extern "C" void * calloc( size_t n, size_t size )
 
     void * p = __libc_calloc( n, size );
 
-    ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, NULL, size );
+    ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, size );
 
     return p;
 }
@@ -216,9 +212,11 @@ extern "C" void * realloc( void * old_p, size_t size )
 {
     //malloc_trace_printf( "realloc called: old_p=%p, size=%d\n", old_p, size );
 
+    ADD_MALLOC_CALL_HISTORY( MallocOperation_Free, old_p, 0 );
+
     void * new_p = __libc_realloc( old_p, size );
 
-    ADD_MALLOC_CALL_HISTORY( MallocOperation_Realloc, old_p, new_p, size );
+    ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, new_p, size );
 
     return new_p;
 }
@@ -251,7 +249,7 @@ extern "C" int posix_memalign( void **memptr, size_t align, size_t size )
         result = ENOMEM;
     }
 
-    ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, *memptr, NULL, size );
+    ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, *memptr, size );
 
     return result;
 }
@@ -260,7 +258,7 @@ extern "C" void free( void * p )
 {
     //malloc_trace_printf( "free called: p=%p\n", p );
 
-    ADD_MALLOC_CALL_HISTORY( MallocOperation_Free, p, NULL, 0 );
+    ADD_MALLOC_CALL_HISTORY( MallocOperation_Free, p, 0 );
 
     __libc_free(p);
 }
@@ -271,7 +269,7 @@ extern "C" void * aligned_alloc( size_t align, size_t size )
 
     void * p = __libc_memalign( align, size );
 
-    ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, NULL, size );
+    ADD_MALLOC_CALL_HISTORY( MallocOperation_Alloc, p, size );
 
     return p;
 }

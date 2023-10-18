@@ -158,10 +158,11 @@ class SymbolResolver:
     
     def print_unresolved(self):
 
-        print("---")
-        print("Unresolved addresses:")
-        for addr in sorted(self.unresolved):
-            print( hex(addr) )
+        if self.unresolved:
+            print("")
+            print("Unresolved addresses (first 10):")
+            for addr in sorted(self.unresolved):
+                print( hex(addr) )
 
 
 class MallocTraceLogParser:
@@ -180,6 +181,7 @@ class MallocTraceLogParser:
                 result.append(name)
             return tuple(result)
 
+        print("")
         print( "Parsing trace log :", filename )
         
         with open( filename, "r" ) as fd:
@@ -219,27 +221,11 @@ class MallocTraceLogParser:
 
                     del self.allocated_memories[p]
                 
-                elif op==3: # realloc
-
-                    p2 = d["p2"]
-
-                    if p=="(nil)":
-                        pass
-                    elif p not in self.allocated_memories:
-                        print(f"Warning : [realloc] freeing unknown memory {p}")
-                    else:
-                        del self.allocated_memories[p]
-
-                    if p2 in self.allocated_memories:
-                        print("Warning : [realloc] already allocated :", p2, self.allocated_memories[p2], (d["size"], d["return_addr"]) )
-
-                    self.allocated_memories[p2] = ( d["size"], resolve_return_addr_list(d["return_addr"]) )
-                
                 else:
                     assert f"Unknown operation : {op}"
 
-        print("")
-        print("Analyziing remaining memory blocks ...")
+        print("\n")
+        print("Num remaining memory blocks and total size:")
         for p, (size,return_addr) in self.allocated_memories.items():
             
             #print( p, size,return_addr )
@@ -250,17 +236,14 @@ class MallocTraceLogParser:
             self.stats[return_addr][0] += 1 # number of blocks
             self.stats[return_addr][1] += size # total size
 
-        print("---")
-        print("Num remaining memory blocks and total size:")
         total_size = 0
         for caller in sorted(self.stats.keys()):
             num_blocks, size = self.stats[caller]
             total_size += size
             print( caller, ": num blocks:", num_blocks, ": total size:", size )
 
-        print("---")
+        print("")
         print("Total remaining size:", total_size)
-        
         
 
 symbol_resolver = SymbolResolver()
