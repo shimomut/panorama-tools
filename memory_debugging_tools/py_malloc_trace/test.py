@@ -18,7 +18,7 @@ while d:
 pid = os.getpid()
 cmd = ["cat", f"/proc/{pid}/maps" ]
 result = subprocess.run(cmd, capture_output=True)
-with open("./memory_map.txt","wb") as fd:
+with open(f"./memory_map.{pid}.txt","wb") as fd:
     fd.write(result.stdout)
 
 print("Done")

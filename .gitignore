@@ -5,4 +5,4 @@ memory_debugging_tools/py_malloc_trace/build
 memory_debugging_tools/py_malloc_trace/results
 memory_debugging_tools/py_malloc_trace/py_malloc_trace
 memory_debugging_tools/py_malloc_trace/*.log
-memory_debugging_tools/py_malloc_trace/memory_map.txt
+memory_debugging_tools/py_malloc_trace/memory_map.*.txt
